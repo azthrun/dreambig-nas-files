@@ -9,10 +9,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/azthrun/dreambig-nas-files/internal/clock"
+	"github.com/azthrun/dreambig-nas-files/internal/identity"
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
 	"github.com/azthrun/dreambig-nas-files/internal/server"
 )
@@ -25,7 +29,20 @@ type Env struct {
 	Clock   *clock.Fake
 	Audit   *bytes.Buffer
 	Handler http.Handler
+	users   map[string]string // name -> password
 	t       testing.TB
+}
+
+// DefaultUser is a User every Env has.
+const DefaultUser = "alice"
+
+// Password returns the test password of a User of this Env.
+func (e *Env) Password(name string) string {
+	pw, ok := e.users[name]
+	if !ok {
+		e.t.Fatalf("testenv: no User %q", name)
+	}
+	return pw
 }
 
 // Option adjusts the environment before the app starts.
@@ -34,6 +51,13 @@ type Option func(*setup)
 type setup struct {
 	mounts   []string
 	readOnly map[string]bool
+	users    []string
+}
+
+// WithUser adds a User (besides DefaultUser) who can sign in. Their password is
+// Env.Password(name).
+func WithUser(name string) Option {
+	return func(s *setup) { s.users = append(s.users, name) }
 }
 
 // Mount adds a writable Mount folder with the given name.
@@ -88,7 +112,23 @@ func TryNew(t testing.TB, opts ...Option) (*Env, error) {
 		}
 		e.Mounts = ms
 	}
-	h, err := server.New(server.Deps{Mounts: e.Mounts, Clock: e.Clock, Audit: e.Audit})
+	// Passwords are built at runtime so no password-looking literal sits in the repo.
+	e.users = map[string]string{}
+	var htpasswd strings.Builder
+	for _, n := range append([]string{DefaultUser}, s.users...) {
+		pw := strings.Repeat(n[:1], 3) + "-test-" + strings.Repeat("pw", 4)
+		hash, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.MinCost)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.users[n] = pw
+		htpasswd.WriteString(n + ":" + string(hash) + "\n")
+	}
+	auth, err := identity.Parse(strings.NewReader(htpasswd.String()))
+	if err != nil {
+		return nil, err
+	}
+	h, err := server.New(server.Deps{Mounts: e.Mounts, Clock: e.Clock, Audit: e.Audit, Auth: auth})
 	if err != nil {
 		return nil, err
 	}

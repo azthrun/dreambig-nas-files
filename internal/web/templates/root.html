@@ -1,0 +1,9 @@
+{{template "header" .}}
+<h1>{{.Title}}</h1>
+<h2>{{t .Lang "root.mounts"}}</h2>
+{{if .Mounts}}<ul class="mounts">
+{{range .Mounts}}<li><a href="{{.Href}}">{{.Name}}</a>{{if .ReadOnly}} <span class="tag">{{t $.Lang "root.read_only"}}</span>{{end}}</li>
+{{end}}</ul>
+{{else}}<p>{{t .Lang "root.no_mounts"}}</p>
+{{end}}
+{{template "footer" .}}

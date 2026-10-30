@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/azthrun/dreambig-nas-files/internal/config"
+	"github.com/azthrun/dreambig-nas-files/internal/identity"
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
 	"github.com/azthrun/dreambig-nas-files/internal/server"
 )
@@ -59,7 +60,12 @@ func run(cfg config.Config, log *slog.Logger) error {
 		}
 	}
 
-	handler, err := server.New(server.Deps{Mounts: ms, Audit: os.Stdout, Log: log})
+	auth, err := identity.Load(cfg.UsersFile)
+	if err != nil {
+		return err
+	}
+
+	handler, err := server.New(server.Deps{Mounts: ms, Auth: auth, Audit: os.Stdout, Log: log})
 	if err != nil {
 		return err
 	}

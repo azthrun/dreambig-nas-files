@@ -15,7 +15,7 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Addr != ":8080" || c.Root != "/data" || !c.RequireMountPoints {
+	if c.Addr != ":8080" || c.Root != "/data" || !c.RequireMountPoints || c.UsersFile != "/config/users.htpasswd" {
 		t.Errorf("defaults wrong: %+v", c)
 	}
 }
@@ -25,11 +25,12 @@ func TestLoadOverrides(t *testing.T) {
 		"NAS_FILES_ADDR":                 "127.0.0.1:9000",
 		"NAS_FILES_ROOT":                 "/srv",
 		"NAS_FILES_REQUIRE_MOUNT_POINTS": "false",
+		"NAS_FILES_USERS_FILE":           "/etc/users",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Addr != "127.0.0.1:9000" || c.Root != "/srv" || c.RequireMountPoints {
+	if c.Addr != "127.0.0.1:9000" || c.Root != "/srv" || c.RequireMountPoints || c.UsersFile != "/etc/users" {
 		t.Errorf("overrides ignored: %+v", c)
 	}
 }

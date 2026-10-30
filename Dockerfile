@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 # Static binary on distroless, linux/amd64 only (DS220+, Intel J4025). Templates and
-# static assets are embedded with go:embed, so no extra COPY is needed beyond the Go tree.
+# static assets live in internal/web and are embedded with go:embed, so the COPY of
+# internal/ is enough. Assets placed outside cmd/ and internal/ need a COPY here and an
+# allow-list line in .dockerignore.
 FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
