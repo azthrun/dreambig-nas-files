@@ -21,6 +21,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /login", s.loginForm)
 	mux.HandleFunc("POST /login", s.login)
+	mux.HandleFunc("GET /lang/{code}", s.switchLanguage) // public: works on the sign-in page
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(web.Static())))
 
 	mux.Handle("GET /{$}", s.protected(s.root))

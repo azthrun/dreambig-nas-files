@@ -2,7 +2,6 @@ package server
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -61,6 +60,7 @@ func pathFromRequest(r *http.Request) (resolver.Path, error) {
 // browse lists a folder: GET /files/<Path>?sort=&order=&page=.
 func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 	user := sessionOf(r).User
+	lang := langOf(r)
 	rest := strings.TrimPrefix(r.URL.EscapedPath(), filesPrefix)
 	if rest == "" || rest == "/" { // the Root is the home page
 		http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -90,14 +90,14 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 	shown, cur, pages := listing.Page(entries, n)
 
 	v := &browseView{
-		Crumbs:   crumbsFor(p),
+		Crumbs:   crumbsFor(lang, p),
 		ReadOnly: loc.Mount.ReadOnly,
 		Empty:    len(entries) == 0,
 		Page:     cur,
 		Pages:    pages,
 	}
 	for _, e := range shown {
-		ev := entryView{Name: e.Name, IsDir: e.IsDir, Modified: e.ModTime.UTC().Format("2006-01-02 15:04"), ISO: e.ModTime.UTC().Format("2006-01-02T15:04:05Z")}
+		ev := entryView{Name: e.Name, IsDir: e.IsDir, Modified: i18n.FormatTime(lang, e.ModTime), ISO: e.ModTime.UTC().Format("2006-01-02T15:04:05Z")}
 		if e.IsDir {
 			child, err := p.Join(e.Name)
 			if err == nil {
@@ -105,7 +105,7 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 			}
 			ev.Size = "-"
 		} else {
-			ev.Size = humanSize(e.Size)
+			ev.Size = i18n.FormatSize(lang, e.Size)
 		}
 		v.Entries = append(v.Entries, ev)
 	}
@@ -162,8 +162,8 @@ func (s *server) refuseBrowse(w http.ResponseWriter, r *http.Request, user strin
 
 // crumbsFor builds the breadcrumb trail: Files > mount > folder > ... The last crumb is
 // the current folder.
-func crumbsFor(p resolver.Path) []crumb {
-	cs := []crumb{{Name: i18n.T(i18n.Default, "root.title"), Href: "/"}}
+func crumbsFor(lang string, p resolver.Path) []crumb {
+	cs := []crumb{{Name: i18n.T(lang, "root.title"), Href: "/"}}
 	segs := p.Segments()
 	for i, name := range segs {
 		sub, err := resolver.ParseSegments(segs[:i+1])
@@ -186,19 +186,4 @@ func query(base string, key listing.Key, order listing.Order, page int) string {
 		parts = append(parts, "page="+strconv.Itoa(page))
 	}
 	return base + "?" + strings.Join(parts, "&")
-}
-
-func humanSize(n int64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
-	}
-	f, suffix := float64(n), ""
-	for _, suffix = range []string{"KB", "MB", "GB", "TB"} {
-		f /= unit
-		if f < unit {
-			break
-		}
-	}
-	return fmt.Sprintf("%.1f %s", f, suffix)
 }

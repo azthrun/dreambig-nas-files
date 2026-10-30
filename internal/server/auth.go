@@ -101,7 +101,7 @@ func (s *server) loginForm(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	s.render(w, r, http.StatusOK, "login.html", page{Title: i18n.T(i18n.Default, "signin.title")})
+	s.render(w, r, http.StatusOK, "login.html", page{Title: i18n.T(langOf(r), "signin.title")})
 }
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
@@ -109,7 +109,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	userKey, ipKey := "user:"+name, "ip:"+clientIP(r)
 	fail := func(status int, key string) {
 		s.audit.Record(audit.Event{User: name, Operation: "signin", Outcome: audit.Refused, Status: status})
-		s.render(w, r, status, "login.html", page{Title: i18n.T(i18n.Default, "signin.title"), Name: name, Error: i18n.T(i18n.Default, key)})
+		s.render(w, r, status, "login.html", page{Title: i18n.T(langOf(r), "signin.title"), Name: name, Error: i18n.T(langOf(r), key)})
 	}
 	if s.limiter.blocked(userKey, ipKey) {
 		fail(http.StatusTooManyRequests, "signin.failed")
@@ -150,7 +150,7 @@ func (s *server) root(w http.ResponseWriter, r *http.Request) {
 	for _, m := range s.Mounts { // #5 narrows this to the Mounts the User has Access to
 		ms = append(ms, mountView{Name: m.Name, Href: "/files/" + url.PathEscape(m.Name), ReadOnly: m.ReadOnly})
 	}
-	s.render(w, r, http.StatusOK, "root.html", page{Title: i18n.T(i18n.Default, "root.title"), Mounts: ms})
+	s.render(w, r, http.StatusOK, "root.html", page{Title: i18n.T(langOf(r), "root.title"), Mounts: ms})
 }
 
 // page is the data every template receives. render fills Lang, User and CSRF.
@@ -163,18 +163,25 @@ type page struct {
 	Error  string
 	Mounts []mountView
 	Browse *browseView
+
+	Next      string // this page's own address, for the language switch to return to
+	LangLinks []langLink
 }
 
 // render writes the named template with status. It fills the session-derived fields.
 func (s *server) render(w http.ResponseWriter, r *http.Request, status int, name string, p page) {
-	p.Lang = i18n.Default
+	p.Lang = langOf(r)
+	if p.Next == "" {
+		p.Next = r.URL.RequestURI()
+	}
+	p.LangLinks = langLinks(p.Lang, p.Next)
 	if sess := sessionOf(r); sess != nil {
 		p.User, p.CSRF = sess.User, sess.CSRF
 	}
 	var buf strings.Builder
 	if err := s.tmpl.ExecuteTemplate(&buf, name, p); err != nil {
 		s.Log.Error("render", "template", name, "err", err)
-		http.Error(w, i18n.T(i18n.Default, "error.internal"), http.StatusInternalServerError)
+		http.Error(w, i18n.T(langOf(r), "error.internal"), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -184,5 +191,6 @@ func (s *server) render(w http.ResponseWriter, r *http.Request, status int, name
 
 // errorPage renders a plain error page for a refused request.
 func (s *server) errorPage(w http.ResponseWriter, r *http.Request, status int, key string) {
-	s.render(w, r, status, "error.html", page{Title: i18n.T(i18n.Default, "error.title"), Error: i18n.T(i18n.Default, key)})
+	s.render(w, r, status, "error.html", page{Title: i18n.T(langOf(r), "error.title"), Error: i18n.T(langOf(r), key),
+		Next: "/"}) // never echo the refused address into the page, even in the switch links
 }
