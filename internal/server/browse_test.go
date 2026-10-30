@@ -406,7 +406,9 @@ func TestPageWorksWithoutJavaScriptAndHasResponsiveDarkStyles(t *testing.T) {
 	e := testenv.New(t, testenv.Mount("docs"))
 	e.WriteFile("docs/a.txt", "x")
 	body := browse(t, e, "/files/docs").Body.String()
-	if strings.Contains(strings.ToLower(body), "<script") {
+	// Scripts only enhance (the Upload panel, #11): never inline, and the listing itself
+	// is server-rendered.
+	if strings.Contains(strings.ToLower(body), "<script>") || !strings.Contains(body, "a.txt") {
 		t.Error("page needs JavaScript")
 	}
 	for _, want := range []string{`name="viewport"`, "/static/app.css"} {

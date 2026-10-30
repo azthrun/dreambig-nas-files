@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/azthrun/dreambig-nas-files/internal/upload"
 	"github.com/azthrun/dreambig-nas-files/internal/web"
 )
 
@@ -26,6 +27,7 @@ func (s *server) routes() http.Handler {
 
 	mux.Handle("GET /{$}", s.protected(s.root))
 	mux.Handle("POST /logout", s.protected(s.logout))
+	mux.Handle(upload.BasePath, s.protected(s.uploads)) // tus: every method, CSRF on writes
 	return s.wrap(s.withFiles(mux))
 }
 
