@@ -26,6 +26,8 @@ func (s *server) routes() http.Handler {
 
 	mux.Handle("GET /{$}", s.protected(s.root))
 	mux.Handle("POST /logout", s.protected(s.logout))
+	mux.Handle("POST /select", s.protected(s.selectItems)) // listing checkbox form; dispatches on action
+	mux.Handle("POST /delete", s.protected(s.deleteItems)) // confirmed delete to the Trash
 	return s.wrap(s.withFiles(mux))
 }
 

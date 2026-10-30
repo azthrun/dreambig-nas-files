@@ -1,0 +1,16 @@
+{{template "header" .}}
+{{with .Confirm}}<h1>{{t $.Lang "delete.title"}}</h1>
+<p>{{t $.Lang "delete.prompt"}}</p>
+<ul class="names">
+{{range .Names}}<li>{{.}}</li>
+{{end}}</ul>
+<p class="note">{{t $.Lang "delete.note"}}</p>
+<form method="post" action="/delete" class="confirm">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<input type="hidden" name="folder" value="{{.Folder}}">
+{{range .Names}}<input type="hidden" name="name" value="{{.}}">
+{{end}}<button type="submit">{{t $.Lang "delete.confirm"}}</button>
+<a href="{{.Back}}">{{t $.Lang "delete.cancel"}}</a>
+</form>
+{{end}}
+{{template "footer" .}}

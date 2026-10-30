@@ -42,11 +42,18 @@ type browseView struct {
 	Columns  []columnView
 	Entries  []entryView
 	ReadOnly bool
-	Empty    bool
-	Page     int
-	Pages    int
-	PrevHref string
-	NextHref string
+	// Folder is this folder's Path, posted back by the selection form.
+	Folder string
+	// Selectable shows the checkbox column and the selection form: true when the User
+	// has at least one action for selected items. Today that is Delete (CanDelete);
+	// zip download (#8) is for readers too, so it sets Selectable for them as well.
+	Selectable bool
+	CanDelete  bool
+	Empty      bool
+	Page       int
+	Pages      int
+	PrevHref   string
+	NextHref   string
 }
 
 // pathFromRequest extracts the Path from /files/<escaped Path>. Anything that is not
@@ -98,10 +105,13 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 	v := &browseView{
 		Crumbs:   crumbsFor(lang, p),
 		ReadOnly: !s.canWriteIn(user, loc),
+		Folder:   p.String(),
 		Empty:    len(entries) == 0,
 		Page:     cur,
 		Pages:    pages,
 	}
+	v.CanDelete = !v.ReadOnly
+	v.Selectable = v.CanDelete
 	for _, e := range shown {
 		ev := entryView{Name: e.Name, IsDir: e.IsDir, Modified: i18n.FormatTime(lang, e.ModTime), ISO: e.ModTime.UTC().Format("2006-01-02T15:04:05Z")}
 		if e.IsDir {

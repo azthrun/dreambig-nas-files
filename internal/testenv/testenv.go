@@ -17,19 +17,23 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/azthrun/dreambig-nas-files/internal/access"
+	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/clock"
 	"github.com/azthrun/dreambig-nas-files/internal/identity"
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
 	"github.com/azthrun/dreambig-nas-files/internal/server"
+	"github.com/azthrun/dreambig-nas-files/internal/trash"
 )
 
 // Env is one running application with its temp Mounts.
 type Env struct {
 	// Dir is the temp data directory; Mount "docs" lives at Dir/docs.
-	Dir     string
-	Mounts  []mounts.Mount
-	Clock   *clock.Fake
-	Audit   *bytes.Buffer
+	Dir    string
+	Mounts []mounts.Mount
+	Clock  *clock.Fake
+	Audit  *bytes.Buffer
+	// Trash is the Trash the app uses; PurgeTrash runs a purge with the fake clock.
+	Trash   *trash.Trash
 	Handler http.Handler
 	users   map[string]string // name -> password
 	t       testing.TB
@@ -51,11 +55,17 @@ func (e *Env) Password(name string) string {
 type Option func(*setup)
 
 type setup struct {
-	mounts   []string
-	readOnly map[string]bool
-	users    []string
-	grants   map[string]map[string]string // user -> mount -> level
-	rawAcc   *string                      // AccessFile content
+	mounts    []string
+	readOnly  map[string]bool
+	users     []string
+	grants    map[string]map[string]string // user -> mount -> level
+	rawAcc    *string                      // AccessFile content
+	trashDays *int
+}
+
+// TrashRetention sets the Trash retention in days (default 30; 0 means never purge).
+func TrashRetention(days int) Option {
+	return func(s *setup) { s.trashDays = &days }
 }
 
 // Grant gives a User an Access level ("none", "read" or "write") in a Mount, as if the
@@ -174,7 +184,20 @@ func TryNew(t testing.TB, opts ...Option) (*Env, error) {
 	if err != nil {
 		return nil, err
 	}
-	h, err := server.New(server.Deps{Mounts: e.Mounts, Clock: e.Clock, Audit: e.Audit, Auth: auth, Access: acc})
+	days := 30
+	if s.trashDays != nil {
+		days = *s.trashDays
+	}
+	tr, err := trash.New(trash.Config{
+		Mounts: e.Mounts, Clock: e.Clock, RetentionDays: days,
+		Audit: audit.New(e.Audit, e.Clock),
+	})
+	if err != nil {
+		return nil, err
+	}
+	t.Cleanup(func() { _ = tr.Close() })
+	e.Trash = tr
+	h, err := server.New(server.Deps{Mounts: e.Mounts, Clock: e.Clock, Audit: e.Audit, Auth: auth, Access: acc, Trash: tr})
 	if err != nil {
 		return nil, err
 	}
@@ -246,3 +269,6 @@ func (e *Env) Chtimes(rel string, mtime time.Time) {
 		e.t.Fatal(err)
 	}
 }
+
+// PurgeTrash runs one Trash purge now, by the fake clock, as the background loop would.
+func (e *Env) PurgeTrash() { e.Trash.Purge() }

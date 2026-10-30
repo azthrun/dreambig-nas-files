@@ -16,6 +16,7 @@ import (
 	"github.com/azthrun/dreambig-nas-files/internal/identity"
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
 	"github.com/azthrun/dreambig-nas-files/internal/resolver"
+	"github.com/azthrun/dreambig-nas-files/internal/trash"
 	"github.com/azthrun/dreambig-nas-files/internal/web"
 )
 
@@ -30,6 +31,9 @@ type Deps struct {
 	Auth identity.Authenticator
 	// Access says what each User may do in each Mount. Required.
 	Access *access.Table
+	// Trash puts deleted content in each Mount's Trash. Required. main starts its purge
+	// loop; the server only places content.
+	Trash *trash.Trash
 	// Audit receives one JSON line per auditable event (stdout in production).
 	Audit io.Writer
 	// Log receives operational logs (stderr in production); defaults to discarding.
@@ -56,6 +60,9 @@ func New(d Deps) (http.Handler, error) {
 	}
 	if d.Access == nil {
 		return nil, errors.New("server: no Access")
+	}
+	if d.Trash == nil {
+		return nil, errors.New("server: no Trash")
 	}
 	if d.Clock == nil {
 		d.Clock = clock.Real{}

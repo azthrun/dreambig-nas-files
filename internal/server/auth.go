@@ -169,6 +169,8 @@ type page struct {
 	Error  string
 	Mounts []mountView
 	Browse *browseView
+	// Confirm is the delete confirmation page's data.
+	Confirm *confirmView
 
 	Next      string // this page's own address, for the language switch to return to
 	LangLinks []langLink

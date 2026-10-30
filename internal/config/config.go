@@ -11,7 +11,7 @@ import (
 // EnvVars lists every environment variable the service itself reads. Variables used
 // only by compose.yaml (UID/GID, host port) are not here; the env-docs test reads those
 // from compose.yaml. Add every new variable here AND to .env.example.
-var EnvVars = []string{envAddr, envRoot, envRequireMountPoints, envUsersFile, envAccessFile}
+var EnvVars = []string{envAddr, envRoot, envRequireMountPoints, envUsersFile, envAccessFile, envTrashRetentionDays}
 
 const (
 	envAddr               = "NAS_FILES_ADDR"
@@ -19,11 +19,13 @@ const (
 	envRequireMountPoints = "NAS_FILES_REQUIRE_MOUNT_POINTS"
 	envUsersFile          = "NAS_FILES_USERS_FILE"
 	envAccessFile         = "NAS_FILES_ACCESS_FILE"
+	envTrashRetentionDays = "NAS_FILES_TRASH_RETENTION_DAYS"
 
 	defaultAddr       = ":8080"
 	defaultRoot       = "/data"
 	defaultUsersFile  = "/config/users.htpasswd"
 	defaultAccessFile = "/config/access.json"
+	defaultTrashDays  = 30
 )
 
 // Config is the service's runtime configuration.
@@ -43,6 +45,8 @@ type Config struct {
 	// per Mount. Startup fails if it is missing or malformed, or names an unknown User
 	// or Mount.
 	AccessFile string
+	// TrashRetentionDays is how long Trash is kept before it is purged; 0 means never.
+	TrashRetentionDays int
 }
 
 // Load builds a Config from getenv (os.Getenv in production).
@@ -53,6 +57,14 @@ func Load(getenv func(string) string) (Config, error) {
 		RequireMountPoints: true,
 		UsersFile:          cmp.Or(getenv(envUsersFile), defaultUsersFile),
 		AccessFile:         cmp.Or(getenv(envAccessFile), defaultAccessFile),
+		TrashRetentionDays: defaultTrashDays,
+	}
+	if s := getenv(envTrashRetentionDays); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 0 {
+			return c, fmt.Errorf("%s: want a whole number of days, 0 or more (0 keeps Trash forever), got %q", envTrashRetentionDays, s)
+		}
+		c.TrashRetentionDays = n
 	}
 	if s := getenv(envRequireMountPoints); s != "" {
 		b, err := strconv.ParseBool(s)
