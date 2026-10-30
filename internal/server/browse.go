@@ -3,9 +3,11 @@ package server
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/azthrun/dreambig-nas-files/internal/access"
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/i18n"
 	"github.com/azthrun/dreambig-nas-files/internal/listing"
@@ -73,9 +75,10 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 	}
 	var entries []resolver.Entry
 	if err == nil {
-		// #5: judge Access by loc.Mount here (a User with no Access gets 404).
-		if _, err = loc.Stat(); err == nil {
-			entries, err = loc.ReadDir()
+		if err = s.authorize(user, loc, access.Read); err == nil {
+			if _, err = loc.Stat(); err == nil {
+				entries, err = loc.ReadDir()
+			}
 		}
 	}
 	if err != nil {
@@ -85,13 +88,16 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 
 	q := r.URL.Query()
 	key, order := listing.ParseKey(q.Get("sort")), listing.ParseOrder(q.Get("order"))
+	entries = slices.DeleteFunc(entries, func(e resolver.Entry) bool {
+		return !s.mountReadable(user, e.Mount) // links into Mounts the User cannot see
+	})
 	listing.Sort(entries, key, order)
 	n, _ := strconv.Atoi(q.Get("page"))
 	shown, cur, pages := listing.Page(entries, n)
 
 	v := &browseView{
 		Crumbs:   crumbsFor(lang, p),
-		ReadOnly: loc.Mount.ReadOnly,
+		ReadOnly: !s.canWriteIn(user, loc),
 		Empty:    len(entries) == 0,
 		Page:     cur,
 		Pages:    pages,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"github.com/azthrun/dreambig-nas-files/internal/access"
 	"net"
 	"net/http"
 	"net/url"
@@ -146,9 +147,14 @@ type mountView struct {
 }
 
 func (s *server) root(w http.ResponseWriter, r *http.Request) {
+	user := sessionOf(r).User
 	var ms []mountView
-	for _, m := range s.Mounts { // #5 narrows this to the Mounts the User has Access to
-		ms = append(ms, mountView{Name: m.Name, Href: "/files/" + url.PathEscape(m.Name), ReadOnly: m.ReadOnly})
+	for _, m := range s.Mounts {
+		lvl := s.Access.Level(user, m)
+		if lvl < access.Read { // a Mount without Access does not exist for this User
+			continue
+		}
+		ms = append(ms, mountView{Name: m.Name, Href: "/files/" + url.PathEscape(m.Name), ReadOnly: lvl < access.Write})
 	}
 	s.render(w, r, http.StatusOK, "root.html", page{Title: i18n.T(langOf(r), "root.title"), Mounts: ms})
 }

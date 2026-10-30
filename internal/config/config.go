@@ -11,17 +11,19 @@ import (
 // EnvVars lists every environment variable the service itself reads. Variables used
 // only by compose.yaml (UID/GID, host port) are not here; the env-docs test reads those
 // from compose.yaml. Add every new variable here AND to .env.example.
-var EnvVars = []string{envAddr, envRoot, envRequireMountPoints, envUsersFile}
+var EnvVars = []string{envAddr, envRoot, envRequireMountPoints, envUsersFile, envAccessFile}
 
 const (
 	envAddr               = "NAS_FILES_ADDR"
 	envRoot               = "NAS_FILES_ROOT"
 	envRequireMountPoints = "NAS_FILES_REQUIRE_MOUNT_POINTS"
 	envUsersFile          = "NAS_FILES_USERS_FILE"
+	envAccessFile         = "NAS_FILES_ACCESS_FILE"
 
-	defaultAddr      = ":8080"
-	defaultRoot      = "/data"
-	defaultUsersFile = "/config/users.htpasswd"
+	defaultAddr       = ":8080"
+	defaultRoot       = "/data"
+	defaultUsersFile  = "/config/users.htpasswd"
+	defaultAccessFile = "/config/access.json"
 )
 
 // Config is the service's runtime configuration.
@@ -37,6 +39,10 @@ type Config struct {
 	// UsersFile is the OS path of the read-only htpasswd-format file of Users with
 	// bcrypt hashes (ADR-0004). Startup fails if it is missing or malformed.
 	UsersFile string
+	// AccessFile is the OS path of the read-only JSON file that sets each User's Access
+	// per Mount. Startup fails if it is missing or malformed, or names an unknown User
+	// or Mount.
+	AccessFile string
 }
 
 // Load builds a Config from getenv (os.Getenv in production).
@@ -46,6 +52,7 @@ func Load(getenv func(string) string) (Config, error) {
 		Root:               cmp.Or(getenv(envRoot), defaultRoot),
 		RequireMountPoints: true,
 		UsersFile:          cmp.Or(getenv(envUsersFile), defaultUsersFile),
+		AccessFile:         cmp.Or(getenv(envAccessFile), defaultAccessFile),
 	}
 	if s := getenv(envRequireMountPoints); s != "" {
 		b, err := strconv.ParseBool(s)

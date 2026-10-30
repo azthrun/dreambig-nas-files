@@ -19,6 +19,9 @@ chmod 755 "$ro"
 smoke_pw="pw-$(date +%s)-$$"
 docker run --rm httpd:2.4-alpine htpasswd -nbB smoke "$smoke_pw" > "$work/users.htpasswd"
 chmod 644 "$work/users.htpasswd"
+# Access file: smoke may write docs and archive (archive is :ro, so it caps at read).
+echo '{"smoke":{"docs":"write","archive":"write"}}' > "$work/access.json"
+chmod 644 "$work/access.json"
 echo hello > "$ro/readme.txt"
 chmod 644 "$ro/readme.txt"
 
@@ -31,7 +34,7 @@ cleanup() {
     docker logs "$name" >&2 2>&1 || true
   fi
   docker rm -f "$name" >/dev/null 2>&1 || true
-  docker rm -f "$name-empty" >/dev/null 2>&1 || true
+  docker rm -f "$name-empty" "$name-bad" >/dev/null 2>&1 || true
   rm -rf "$work"
 }
 trap cleanup EXIT
@@ -43,7 +46,8 @@ case "$img_user" in "" | 0 | root | 0:* | root:*) fail "image runs as root (User
 # 2. It starts as an arbitrary uid with one writable and one :ro Mount.
 docker run -d --name "$name" --user "$uid:$gid" -p 127.0.0.1::8080 \
   -v "$rw:/data/docs" -v "$ro:/data/archive:ro" \
-  -v "$work/users.htpasswd:/config/users.htpasswd:ro" "$image" > /dev/null
+  -v "$work/users.htpasswd:/config/users.htpasswd:ro" \
+  -v "$work/access.json:/config/access.json:ro" "$image" > /dev/null
 
 # 3. It reports healthy (the image HEALTHCHECK runs the binary's -healthcheck).
 health=""
@@ -84,6 +88,18 @@ curl -s -b "$jar" "$base/" | grep -q 'archive' || fail "signed-in Root does not 
 code="$(curl -s -o /dev/null -w '%{http_code}' --data-urlencode name=smoke --data-urlencode password=wrong "$base/login")"
 [ "$code" = 401 ] || fail "failed sign-in answered $code, want 401"
 docker logs "$name" 2>/dev/null | grep -q '"operation":"signin"' || fail "no audit line for sign-in"
+
+# 6c. Access: a granted Mount browses; an Access file naming an unknown User is refused.
+code="$(curl -s -o /dev/null -w '%{http_code}' -b "$jar" "$base/files/archive")"
+[ "$code" = 200 ] || fail "browse archive answered $code, want 200"
+echo '{"nobody":{"docs":"read"}}' > "$work/access-bad.json"
+chmod 644 "$work/access-bad.json"
+if docker run --name "$name-bad" --user "$uid:$gid" -v "$rw:/data/docs" \
+  -v "$work/users.htpasswd:/config/users.htpasswd:ro" \
+  -v "$work/access-bad.json:/config/access.json:ro" "$image" > /dev/null 2>&1; then
+  fail "started with an Access file naming an unknown User"
+fi
+docker logs "$name-bad" 2>&1 | grep -q 'unknown User' || fail "no clear error for a bad Access file"
 
 # 7. With no Mounts the container refuses to start, with a clear error.
 if docker run --name "$name-empty" --user "$uid:$gid" "$image" > /dev/null 2>&1; then

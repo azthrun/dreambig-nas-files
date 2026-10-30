@@ -10,6 +10,7 @@ import (
 
 	"html/template"
 
+	"github.com/azthrun/dreambig-nas-files/internal/access"
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/clock"
 	"github.com/azthrun/dreambig-nas-files/internal/identity"
@@ -27,6 +28,8 @@ type Deps struct {
 	Clock clock.Clock
 	// Auth verifies sign-ins (the htpasswd file in production). Required.
 	Auth identity.Authenticator
+	// Access says what each User may do in each Mount. Required.
+	Access *access.Table
 	// Audit receives one JSON line per auditable event (stdout in production).
 	Audit io.Writer
 	// Log receives operational logs (stderr in production); defaults to discarding.
@@ -50,6 +53,9 @@ func New(d Deps) (http.Handler, error) {
 	}
 	if d.Auth == nil {
 		return nil, errors.New("server: no authenticator")
+	}
+	if d.Access == nil {
+		return nil, errors.New("server: no Access")
 	}
 	if d.Clock == nil {
 		d.Clock = clock.Real{}

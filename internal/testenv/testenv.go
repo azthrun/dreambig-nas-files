@@ -5,6 +5,7 @@ package testenv
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/azthrun/dreambig-nas-files/internal/access"
 	"github.com/azthrun/dreambig-nas-files/internal/clock"
 	"github.com/azthrun/dreambig-nas-files/internal/identity"
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
@@ -52,6 +54,27 @@ type setup struct {
 	mounts   []string
 	readOnly map[string]bool
 	users    []string
+	grants   map[string]map[string]string // user -> mount -> level
+	rawAcc   *string                      // AccessFile content
+}
+
+// Grant gives a User an Access level ("none", "read" or "write") in a Mount, as if the
+// owner had written it in the Access file. The first Grant (or AccessFile) turns off the
+// default, which is DefaultUser with write Access to every Mount; Users not granted
+// anything have none.
+func Grant(user, mount, level string) Option {
+	return func(s *setup) {
+		if s.grants[user] == nil {
+			s.grants[user] = map[string]string{}
+		}
+		s.grants[user][mount] = level
+	}
+}
+
+// AccessFile replaces the Access file content with raw text, for startup-refusal tests
+// (use TryNew).
+func AccessFile(content string) Option {
+	return func(s *setup) { s.rawAcc = &content }
 }
 
 // WithUser adds a User (besides DefaultUser) who can sign in. Their password is
@@ -90,7 +113,7 @@ func New(t testing.TB, opts ...Option) *Env {
 // TryNew is New but returns the startup error, for tests of startup refusals.
 func TryNew(t testing.TB, opts ...Option) (*Env, error) {
 	t.Helper()
-	s := &setup{readOnly: map[string]bool{}}
+	s := &setup{readOnly: map[string]bool{}, grants: map[string]map[string]string{}}
 	for _, o := range opts {
 		o(s)
 	}
@@ -128,7 +151,30 @@ func TryNew(t testing.TB, opts ...Option) (*Env, error) {
 	if err != nil {
 		return nil, err
 	}
-	h, err := server.New(server.Deps{Mounts: e.Mounts, Clock: e.Clock, Audit: e.Audit, Auth: auth})
+	accessJSON := ""
+	switch {
+	case s.rawAcc != nil:
+		accessJSON = *s.rawAcc
+	default:
+		grants := s.grants
+		if len(grants) == 0 {
+			grants = map[string]map[string]string{DefaultUser: {}}
+			for _, m := range e.Mounts {
+				grants[DefaultUser][m.Name] = "write"
+			}
+		}
+		b, err := json.Marshal(grants)
+		if err != nil {
+			t.Fatal(err)
+		}
+		accessJSON = string(b)
+	}
+	names := auth.Names()
+	acc, err := access.Parse(strings.NewReader(accessJSON), names, e.Mounts)
+	if err != nil {
+		return nil, err
+	}
+	h, err := server.New(server.Deps{Mounts: e.Mounts, Clock: e.Clock, Audit: e.Audit, Auth: auth, Access: acc})
 	if err != nil {
 		return nil, err
 	}
