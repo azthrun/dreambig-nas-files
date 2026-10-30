@@ -33,6 +33,10 @@ table.files td.modified { white-space: nowrap; color: var(--muted); }
 table.files tbody tr:hover { background: var(--hover); }
 tr.dir td.name a { font-weight: 600; }
 
+.sr { position: absolute; left: -9999px; }
+table.files td.select, table.files th.select { width: 2rem; }
+p.actions { margin: .75rem 0; }
+
 .pager { display: flex; gap: 1rem; justify-content: center; align-items: center; margin: 1rem 0; }
 
 @media (max-width: 40rem) {
@@ -41,5 +45,7 @@ tr.dir td.name a { font-weight: 600; }
   table.files, table.files tbody, table.files tr, table.files td { display: block; }
   table.files tr { padding: .5rem .75rem; border-bottom: 1px solid var(--faint); }
   table.files td { border: 0; padding: 0; text-align: left !important; }
+  table.files td.select { display: inline-block; width: auto; margin-right: .5rem; }
+  table.files td.name { display: inline; }
   table.files td.size, table.files td.modified { display: inline-block; font-size: .85em; color: var(--muted); margin-right: .75rem; }
 }

@@ -93,6 +93,17 @@ func (c *Client) do(r *http.Request) *httptest.ResponseRecorder {
 	return rec
 }
 
+// ServeTo serves r as this client into a caller-supplied ResponseWriter, for tests of
+// huge or streaming responses that must not be buffered by a recorder.
+func (c *Client) ServeTo(w http.ResponseWriter, r *http.Request) {
+	c.e.t.Helper()
+	r.RemoteAddr = c.addr
+	if c.cookie != nil {
+		r.AddCookie(&http.Cookie{Name: c.cookie.Name, Value: c.cookie.Value})
+	}
+	c.e.Handler.ServeHTTP(w, r)
+}
+
 // Get performs a GET as this client.
 func (c *Client) Get(target string) *httptest.ResponseRecorder {
 	c.e.t.Helper()

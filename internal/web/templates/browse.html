@@ -3,18 +3,27 @@
 {{range $i, $c := .Crumbs}}<li>{{if eq (len (slice $.Browse.Crumbs $i)) 1}}<span aria-current="page">{{$c.Name}}</span>{{else}}<a href="{{$c.Href}}">{{$c.Name}}</a>{{end}}</li>
 {{end}}</ol>{{if .ReadOnly}} <span class="tag">{{t $.Lang "root.read_only"}}</span>{{end}}</nav>
 {{if .Empty}}<p class="empty">{{t $.Lang "browse.empty"}}</p>
-{{else}}<table class="files">
+{{else}}<p class="actions"><a href="{{.ZipHref}}">{{t $.Lang "browse.zip_folder"}}</a></p>
+{{/* One selection form for every row action; each action is a submit button named
+     "action" (zip now; delete from #10). Plain HTML, works with JS off. */}}
+<form method="post" action="{{.Action}}" class="selection">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<table class="files">
 <thead><tr>
+<th scope="col" class="select"><span class="sr">{{t $.Lang "browse.select"}}</span></th>
 {{range .Columns}}<th scope="col"{{if .Current}} aria-sort="ascending"{{end}}><a href="{{.Href}}">{{t $.Lang .Label}}</a>{{if .Current}} <span aria-hidden="true">{{.Arrow}}</span>{{end}}</th>
 {{end}}</tr></thead>
 <tbody>
 {{range .Entries}}<tr class="{{if .IsDir}}dir{{else}}file{{end}}">
+<td class="select"><input type="checkbox" name="names" value="{{.Name}}" aria-label="{{t $.Lang "browse.select"}}: {{.Name}}"></td>
 <td class="name">{{if .Href}}<a href="{{.Href}}">{{.Name}}</a>{{else}}<span>{{.Name}}</span>{{end}}</td>
 <td class="size">{{.Size}}</td>
 <td class="modified"><time datetime="{{.ISO}}">{{.Modified}}</time></td>
 </tr>
 {{end}}</tbody>
 </table>
+<p class="actions"><button type="submit" name="action" value="zip">{{t $.Lang "browse.zip_selected"}}</button></p>
+</form>
 {{if gt .Pages 1}}<nav class="pager" aria-label="{{t $.Lang "browse.pages"}}">
 {{if .PrevHref}}<a href="{{.PrevHref}}" rel="prev">{{t $.Lang "browse.prev"}}</a>{{end}}
 <span>{{t $.Lang "browse.page_of" .Page .Pages}}</span>

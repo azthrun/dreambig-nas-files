@@ -49,9 +49,30 @@ func (s *server) filesRoute(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
 		s.browse(w, r)
+	case http.MethodPost:
+		s.filesPost(w, r)
 	default:
-		w.Header().Set("Allow", "GET, HEAD")
+		w.Header().Set("Allow", "GET, HEAD, POST")
 		s.errorPage(w, r, http.StatusMethodNotAllowed, "error.method")
+	}
+}
+
+// filesPost handles the browse table's one selection form: POST /files/<folder> with an
+// action field naming the submit button. CSRF is already enforced by s.protected. Other
+// tickets add their actions (delete, ...) to this switch; they share the names=
+// checkboxes.
+func (s *server) filesPost(w http.ResponseWriter, r *http.Request) {
+	user := sessionOf(r).User
+	p, err := pathFromRequest(r)
+	if err != nil {
+		s.refuseBrowse(w, r, user, p, err)
+		return
+	}
+	switch r.PostFormValue("action") {
+	case "zip":
+		s.zipSelection(w, r, user, p)
+	default:
+		s.errorPage(w, r, http.StatusBadRequest, "error.bad_path")
 	}
 }
 

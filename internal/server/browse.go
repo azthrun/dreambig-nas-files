@@ -43,6 +43,8 @@ type browseView struct {
 	Columns  []columnView
 	Entries  []entryView
 	ReadOnly bool
+	Action   string // the selection form posts here (this folder)
+	ZipHref  string // GET: the whole folder as a zip
 	Empty    bool
 	Page     int
 	Pages    int
@@ -83,6 +85,10 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 					s.download(w, r, user, p, loc, fi)
 					return
 				}
+				if r.URL.Query().Has("zip") { // a folder as one zip
+					s.zipFolder(w, r, user, p, loc)
+					return
+				}
 				entries, err = loc.ReadDir()
 			}
 		}
@@ -104,6 +110,8 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 	v := &browseView{
 		Crumbs:   crumbsFor(lang, p),
 		ReadOnly: !s.canWriteIn(user, loc),
+		Action:   folderHref(p),
+		ZipHref:  folderHref(p) + "?zip=1",
 		Empty:    len(entries) == 0,
 		Page:     cur,
 		Pages:    pages,
