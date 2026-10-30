@@ -14,6 +14,7 @@ import (
 	"github.com/azthrun/dreambig-nas-files/internal/clock"
 	"github.com/azthrun/dreambig-nas-files/internal/identity"
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
+	"github.com/azthrun/dreambig-nas-files/internal/resolver"
 	"github.com/azthrun/dreambig-nas-files/internal/web"
 )
 
@@ -38,6 +39,8 @@ type server struct {
 	sessions *sessions
 	limiter  *limiter
 	tmpl     *template.Template
+	// res is the Path resolver: every request-supplied Path goes through it.
+	res *resolver.Resolver
 }
 
 // New builds the application handler.
@@ -61,7 +64,12 @@ func New(d Deps) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	res, err := resolver.New(d.Mounts)
+	if err != nil {
+		return nil, err
+	}
 	s := &server{
+		res:      res,
 		Deps:     d,
 		audit:    audit.New(d.Audit, d.Clock),
 		sessions: newSessions(d.Clock),

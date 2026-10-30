@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/azthrun/dreambig-nas-files/internal/web"
 )
@@ -24,7 +25,33 @@ func (s *server) routes() http.Handler {
 
 	mux.Handle("GET /{$}", s.protected(s.root))
 	mux.Handle("POST /logout", s.protected(s.logout))
-	return s.wrap(mux)
+	return s.wrap(s.withFiles(mux))
+}
+
+// withFiles sends everything under /files straight to its handlers, bypassing the
+// ServeMux, whose path cleaning would redirect "..", "." and "//" instead of letting
+// the Path resolver refuse them. Later tickets add their /files/... methods in
+// filesRoute, always behind s.protected.
+func (s *server) withFiles(mux http.Handler) http.Handler {
+	files := s.protected(s.filesRoute)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/files" || strings.HasPrefix(r.URL.Path, "/files/") {
+			files.ServeHTTP(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+// filesRoute dispatches /files/<Path>. The Path is parsed from the escaped URL path.
+func (s *server) filesRoute(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+		s.browse(w, r)
+	default:
+		w.Header().Set("Allow", "GET, HEAD")
+		s.errorPage(w, r, http.StatusMethodNotAllowed, "error.method")
+	}
 }
 
 // wrap applies middleware common to every route: security headers. Nothing here needs

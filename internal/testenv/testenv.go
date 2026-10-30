@@ -179,3 +179,24 @@ func (e *Env) ReadFile(rel string) string {
 	}
 	return string(b)
 }
+
+// Symlink creates a symbolic link at rel (relative to Dir) pointing at target, which is
+// written as given (absolute, or relative to the link's folder).
+func (e *Env) Symlink(rel, target string) {
+	e.t.Helper()
+	p := filepath.Join(e.Dir, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		e.t.Fatal(err)
+	}
+	if err := os.Symlink(target, p); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// Chtimes sets the modification time of the file or folder at rel.
+func (e *Env) Chtimes(rel string, mtime time.Time) {
+	e.t.Helper()
+	if err := os.Chtimes(filepath.Join(e.Dir, filepath.FromSlash(rel)), mtime, mtime); err != nil {
+		e.t.Fatal(err)
+	}
+}

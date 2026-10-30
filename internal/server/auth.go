@@ -162,6 +162,7 @@ type page struct {
 	Name   string
 	Error  string
 	Mounts []mountView
+	Browse *browseView
 }
 
 // render writes the named template with status. It fills the session-derived fields.
