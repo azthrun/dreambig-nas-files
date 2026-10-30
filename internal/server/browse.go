@@ -43,6 +43,7 @@ type browseView struct {
 	Columns  []columnView
 	Entries  []entryView
 	ReadOnly bool
+	MkdirURL string // where the create-folder form posts; shown only when !ReadOnly
 	Empty    bool
 	Page     int
 	Pages    int
@@ -104,6 +105,7 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 	v := &browseView{
 		Crumbs:   crumbsFor(lang, p),
 		ReadOnly: !s.canWriteIn(user, loc),
+		MkdirURL: folderHref(p),
 		Empty:    len(entries) == 0,
 		Page:     cur,
 		Pages:    pages,
