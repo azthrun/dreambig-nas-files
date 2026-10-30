@@ -8,8 +8,13 @@ import (
 	"log/slog"
 	"net/http"
 
+	"html/template"
+
+	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/clock"
+	"github.com/azthrun/dreambig-nas-files/internal/identity"
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
+	"github.com/azthrun/dreambig-nas-files/internal/web"
 )
 
 // Deps is everything the application needs from outside. Later tickets add fields
@@ -19,6 +24,8 @@ type Deps struct {
 	Mounts []mounts.Mount
 	// Clock is the time source; defaults to the wall clock.
 	Clock clock.Clock
+	// Auth verifies sign-ins (the htpasswd file in production). Required.
+	Auth identity.Authenticator
 	// Audit receives one JSON line per auditable event (stdout in production).
 	Audit io.Writer
 	// Log receives operational logs (stderr in production); defaults to discarding.
@@ -27,12 +34,19 @@ type Deps struct {
 
 type server struct {
 	Deps
+	audit    *audit.Logger // s.audit.Record(audit.Event{...}) is the one audit API
+	sessions *sessions
+	limiter  *limiter
+	tmpl     *template.Template
 }
 
 // New builds the application handler.
 func New(d Deps) (http.Handler, error) {
 	if len(d.Mounts) == 0 {
 		return nil, errors.New("server: no Mounts")
+	}
+	if d.Auth == nil {
+		return nil, errors.New("server: no authenticator")
 	}
 	if d.Clock == nil {
 		d.Clock = clock.Real{}
@@ -43,6 +57,16 @@ func New(d Deps) (http.Handler, error) {
 	if d.Log == nil {
 		d.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	s := &server{Deps: d}
+	tmpl, err := web.Templates()
+	if err != nil {
+		return nil, err
+	}
+	s := &server{
+		Deps:     d,
+		audit:    audit.New(d.Audit, d.Clock),
+		sessions: newSessions(d.Clock),
+		limiter:  newLimiter(d.Clock),
+		tmpl:     tmpl,
+	}
 	return s.routes(), nil
 }

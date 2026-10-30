@@ -16,6 +16,7 @@ services:
       NAS_FILES_ADDR: "0.0.0.0:8080"
       NAS_FILES_ROOT: /data
       NAS_FILES_REQUIRE_MOUNT_POINTS: "true"
+      NAS_FILES_USERS_FILE: /config/users.htpasswd
     ports:
       # The only published port (ADR-0002). Firewall it to the LAN and 100.64.0.0/10.
       - "${NAS_FILES_HOST_PORT:-8080}:8080"
@@ -23,6 +24,8 @@ services:
       # Mounts: replace with your shared folders. Placeholders only.
       - /volume1/<share>:/data/<mount>
       - /volume1/<archive>:/data/<archive-mount>:ro
+      # Users: an htpasswd file with bcrypt hashes (see .env.example), read-only.
+      - /volume1/<config>/users.htpasswd:/config/users.htpasswd:ro
     healthcheck:
       test: ["CMD", "/nas-files", "-healthcheck"]
       interval: 30s

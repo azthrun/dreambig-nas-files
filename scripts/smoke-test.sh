@@ -15,6 +15,10 @@ ro="$work/archive"
 mkdir -p "$rw" "$ro"
 chmod 777 "$rw"
 chmod 755 "$ro"
+# Users file: one bcrypt entry, password generated per run (nothing secret in the repo).
+smoke_pw="pw-$(date +%s)-$$"
+docker run --rm httpd:2.4-alpine htpasswd -nbB smoke "$smoke_pw" > "$work/users.htpasswd"
+chmod 644 "$work/users.htpasswd"
 echo hello > "$ro/readme.txt"
 chmod 644 "$ro/readme.txt"
 
@@ -38,7 +42,8 @@ case "$img_user" in "" | 0 | root | 0:* | root:*) fail "image runs as root (User
 
 # 2. It starts as an arbitrary uid with one writable and one :ro Mount.
 docker run -d --name "$name" --user "$uid:$gid" -p 127.0.0.1::8080 \
-  -v "$rw:/data/docs" -v "$ro:/data/archive:ro" "$image" > /dev/null
+  -v "$rw:/data/docs" -v "$ro:/data/archive:ro" \
+  -v "$work/users.htpasswd:/config/users.htpasswd:ro" "$image" > /dev/null
 
 # 3. It reports healthy (the image HEALTHCHECK runs the binary's -healthcheck).
 health=""
@@ -67,6 +72,18 @@ if grep -q '"type":"warning"' <<< "$logs"; then
   fail "unexpected startup warning for a :ro Mount"
 fi
 grep -q '"mounts":\["archive","docs"\]' <<< "$logs" || fail "both Mounts not discovered"
+
+# 6b. Sign-in: Root needs a session; the right password gets one and the Root lists Mounts.
+base="http://127.0.0.1:$hostport"
+code="$(curl -s -o /dev/null -w '%{http_code}' "$base/")"
+[ "$code" = 303 ] || fail "Root without a session answered $code, want 303"
+jar="$work/cookies"
+code="$(curl -s -o /dev/null -w '%{http_code}' -c "$jar" --data-urlencode name=smoke --data-urlencode "password=$smoke_pw" "$base/login")"
+[ "$code" = 303 ] || fail "sign-in answered $code, want 303"
+curl -s -b "$jar" "$base/" | grep -q 'archive' || fail "signed-in Root does not list Mounts"
+code="$(curl -s -o /dev/null -w '%{http_code}' --data-urlencode name=smoke --data-urlencode password=wrong "$base/login")"
+[ "$code" = 401 ] || fail "failed sign-in answered $code, want 401"
+docker logs "$name" 2>/dev/null | grep -q '"operation":"signin"' || fail "no audit line for sign-in"
 
 # 7. With no Mounts the container refuses to start, with a clear error.
 if docker run --name "$name-empty" --user "$uid:$gid" "$image" > /dev/null 2>&1; then
