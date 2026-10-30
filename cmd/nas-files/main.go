@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/azthrun/dreambig-nas-files/internal/access"
 	"github.com/azthrun/dreambig-nas-files/internal/config"
 	"github.com/azthrun/dreambig-nas-files/internal/identity"
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
@@ -65,7 +66,12 @@ func run(cfg config.Config, log *slog.Logger) error {
 		return err
 	}
 
-	handler, err := server.New(server.Deps{Mounts: ms, Auth: auth, Audit: os.Stdout, Log: log})
+	acc, err := access.Load(cfg.AccessFile, auth.Names(), ms)
+	if err != nil {
+		return err
+	}
+
+	handler, err := server.New(server.Deps{Mounts: ms, Auth: auth, Access: acc, Audit: os.Stdout, Log: log})
 	if err != nil {
 		return err
 	}

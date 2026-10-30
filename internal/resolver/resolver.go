@@ -111,12 +111,62 @@ func (r *Resolver) Resolve(p Path) (Location, error) {
 	if mount == nil {
 		return Location{}, ErrNotFound
 	}
-	loc, err := r.locate(*mount, p.segs[1:])
+	loc, err := r.locate(*mount, r.diskNames(*mount, p.segs[1:]))
 	if err != nil {
 		return Location{}, err
 	}
 	loc.Path = p
 	return loc, nil
+}
+
+// diskNames maps NFC request segments to the names stored on disk. Linux filesystems
+// keep whatever bytes the client sent, so a file saved from a Mac may be stored NFD
+// while its link (built from the NFC name we show) is NFC. For each segment: the exact
+// name wins; otherwise the folder entry whose name normalises to the segment is used.
+// Segments that match nothing are kept as requested (a missing target). Only names are
+// read here; locate still resolves, bounds and Hidden-checks the result.
+func (r *Resolver) diskNames(mount mounts.Mount, segs []string) []string {
+	out := make([]string, 0, len(segs))
+	dir := mount.Path
+	for i, seg := range segs {
+		name := seg
+		if !isASCII(seg) {
+			if _, err := os.Lstat(filepath.Join(dir, seg)); err != nil {
+				if got, ok := normalisedMatch(dir, seg); ok {
+					name = got
+				}
+			}
+		}
+		out = append(out, name)
+		dir = filepath.Join(dir, name)
+		if _, err := os.Stat(dir); err != nil { // nothing deeper can exist
+			return append(out, segs[i+1:]...)
+		}
+	}
+	return out
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// normalisedMatch finds the entry of dir whose NFC form is want.
+func normalisedMatch(dir, want string) (string, bool) {
+	des, err := os.ReadDir(dir)
+	if err != nil {
+		return "", false
+	}
+	for _, de := range des {
+		if norm.NFC.String(de.Name()) == want {
+			return de.Name(), true
+		}
+	}
+	return "", false
 }
 
 // locate resolves segs below mount's folder.
@@ -238,6 +288,9 @@ type Entry struct {
 	IsDir   bool
 	Size    int64
 	ModTime time.Time
+	// Mount is the name of the Mount the entry really lives in: a symlink into another
+	// Mount reports that Mount, so callers can drop entries the User has no Access to.
+	Mount string
 }
 
 // ReadDir lists the folder, unsorted. Hidden Entries are never included; neither are
@@ -263,15 +316,16 @@ func (l Location) ReadDir() ([]Entry, error) {
 			continue
 		}
 		var fi fs.FileInfo
+		mount := l.Mount.Name
 		if de.Type()&fs.ModeSymlink != 0 {
-			fi = l.followChild(name)
+			fi, mount = l.followChild(name)
 		} else if got, err := de.Info(); err == nil {
 			fi = got
 		}
 		if fi == nil {
 			continue // removed meanwhile, or a link we refuse to show
 		}
-		e := Entry{Name: norm.NFC.String(name), IsDir: fi.IsDir(), ModTime: fi.ModTime()}
+		e := Entry{Name: norm.NFC.String(name), IsDir: fi.IsDir(), ModTime: fi.ModTime(), Mount: mount}
 		if !fi.IsDir() {
 			e.Size = fi.Size()
 		}
@@ -282,14 +336,14 @@ func (l Location) ReadDir() ([]Entry, error) {
 
 // followChild stats the symlink name in this folder as the Resolver would resolve it,
 // or returns nil when it must not be shown.
-func (l Location) followChild(name string) fs.FileInfo {
+func (l Location) followChild(name string) (fs.FileInfo, string) {
 	child, err := l.res.locate(l.Mount, append(append([]string{}, l.Real...), name))
 	if err != nil || !child.Exists {
-		return nil
+		return nil, ""
 	}
 	fi, err := child.Stat()
 	if err != nil {
-		return nil
+		return nil, ""
 	}
-	return fi
+	return fi, child.Mount.Name
 }

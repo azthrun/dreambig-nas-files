@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
@@ -86,6 +87,16 @@ func Parse(r io.Reader) (*Htpasswd, error) {
 		return nil, errors.New("no Users defined")
 	}
 	return h, nil
+}
+
+// Names lists the Users, sorted.
+func (h *Htpasswd) Names() []string {
+	names := make([]string, 0, len(h.hashes))
+	for n := range h.hashes {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	return names
 }
 
 // Authenticate implements Authenticator.
