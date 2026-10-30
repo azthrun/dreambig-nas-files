@@ -1,0 +1,31 @@
+# NAS Files. Import as a Project in Synology Container Manager (or `docker compose up -d`).
+# Mounts are declared ONLY by the volume lines below: one line per shared folder, mounted
+# as /data/<mount name>. Add ":ro" to make a Mount read-only. Each folder must be its own
+# bind mount (a plain sub-folder of another Mount is refused at startup).
+name: dreambig-nas-files
+
+services:
+  nas-files:
+    # Pin a release tag; do not use :latest on the NAS.
+    image: ghcr.io/azthrun/dreambig-nas-files:v0.0.0
+    platform: linux/amd64
+    restart: unless-stopped
+    # The dedicated DSM user; see .env.example.
+    user: "${NAS_FILES_UID:?set NAS_FILES_UID in .env}:${NAS_FILES_GID:?set NAS_FILES_GID in .env}"
+    environment:
+      NAS_FILES_ADDR: "0.0.0.0:8080"
+      NAS_FILES_ROOT: /data
+      NAS_FILES_REQUIRE_MOUNT_POINTS: "true"
+    ports:
+      # The only published port (ADR-0002). Firewall it to the LAN and 100.64.0.0/10.
+      - "${NAS_FILES_HOST_PORT:-8080}:8080"
+    volumes:
+      # Mounts: replace with your shared folders. Placeholders only.
+      - /volume1/<share>:/data/<mount>
+      - /volume1/<archive>:/data/<archive-mount>:ro
+    healthcheck:
+      test: ["CMD", "/nas-files", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
