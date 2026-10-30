@@ -44,6 +44,7 @@ type browseView struct {
 	Entries  []entryView
 	ReadOnly bool
 	Dest     string // this folder's Path: where the upload panel sends files
+	MkdirURL string // where the create-folder form posts; shown only when !ReadOnly
 	Empty    bool
 	Page     int
 	Pages    int
@@ -106,6 +107,7 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 		Crumbs:   crumbsFor(lang, p),
 		ReadOnly: !s.canWriteIn(user, loc),
 		Dest:     p.String(),
+		MkdirURL: folderHref(p),
 		Empty:    len(entries) == 0,
 		Page:     cur,
 		Pages:    pages,
