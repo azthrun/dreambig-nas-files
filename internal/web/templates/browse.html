@@ -2,7 +2,13 @@
 {{with .Browse}}<nav class="crumbs" aria-label="{{t $.Lang "browse.location"}}"><ol>
 {{range $i, $c := .Crumbs}}<li>{{if eq (len (slice $.Browse.Crumbs $i)) 1}}<span aria-current="page">{{$c.Name}}</span>{{else}}<a href="{{$c.Href}}">{{$c.Name}}</a>{{end}}</li>
 {{end}}</ol>{{if .ReadOnly}} <span class="tag">{{t $.Lang "root.read_only"}}</span>{{end}}</nav>
-{{if .Empty}}<p class="empty">{{t $.Lang "browse.empty"}}</p>
+{{if not .ReadOnly}}<form class="mkdir" method="post" action="{{.MkdirURL}}">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<input type="hidden" name="op" value="mkdir">
+<label>{{t $.Lang "browse.folder_name"}} <input type="text" name="name" required maxlength="255" autocomplete="off"></label>
+<button type="submit">{{t $.Lang "browse.create_folder"}}</button>
+</form>
+{{end}}{{if .Empty}}<p class="empty">{{t $.Lang "browse.empty"}}</p>
 {{else}}{{if .Selectable}}<form method="post" action="/select" class="select">
 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
 <input type="hidden" name="folder" value="{{.Folder}}">

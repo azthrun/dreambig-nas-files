@@ -1,0 +1,137 @@
+package server
+
+import (
+	"errors"
+	"net/http"
+	"os"
+
+	"github.com/azthrun/dreambig-nas-files/internal/access"
+	"github.com/azthrun/dreambig-nas-files/internal/audit"
+	"github.com/azthrun/dreambig-nas-files/internal/mounts"
+	"github.com/azthrun/dreambig-nas-files/internal/resolver"
+)
+
+// errExists is a create that would land on a name already taken (409).
+var errExists = errors.New("name already exists")
+
+// mkdirMode is the folder mode before the process umask.
+const mkdirMode = 0o775
+
+// mkdir creates a folder: POST /files/<parent Path> with form fields op=mkdir and
+// name. It works as a plain HTML form (no JavaScript) and answers 303 back to the
+// parent's listing. Order matters: no Access to the parent looks like a missing Path
+// (404) before anything about the name is judged.
+func (s *server) mkdir(w http.ResponseWriter, r *http.Request) {
+	user := sessionOf(r).User
+	name := r.PostFormValue("name")
+	target := resolver.Path{} // what the audit line names: the new folder if it can be formed
+
+	fail := func(err error) {
+		s.refuseCreate(w, r, user, target, err)
+	}
+	parent, err := pathFromRequest(r)
+	if err != nil {
+		fail(err)
+		return
+	}
+	target = parent
+	ploc, err := s.res.Resolve(parent)
+	if err != nil {
+		fail(err)
+		return
+	}
+	if err = s.authorize(user, ploc, access.Read); err != nil {
+		fail(err)
+		return
+	}
+	if !ploc.IsRoot() {
+		if fi, serr := ploc.Stat(); serr != nil || !fi.IsDir() {
+			fail(resolver.ErrNotFolder)
+			return
+		}
+	}
+	if child, jerr := parent.JoinNew(name); jerr == nil {
+		target = child
+	}
+	if !s.canWriteIn(user, ploc) { // the Root, read Access, or a read-only Mount
+		fail(errForbidden)
+		return
+	}
+	child, err := parent.JoinNew(name)
+	if err != nil {
+		fail(err)
+		return
+	}
+	cloc, err := s.res.Resolve(child)
+	if err != nil {
+		fail(err)
+		return
+	}
+	// The new Path's real Mount decides: a name that is a link into another Mount, or
+	// into a Mount folder itself, is judged there.
+	if err = s.authorize(user, cloc, access.Write); err != nil {
+		fail(err)
+		return
+	}
+	if cloc.Exists || s.clashes(ploc, child.Name()) {
+		fail(errExists)
+		return
+	}
+	root, err := cloc.OS()
+	if err == nil {
+		err = root.Mkdir(cloc.Rel(), mkdirMode)
+	}
+	if errors.Is(err, os.ErrExist) {
+		err = errExists
+	}
+	if err != nil {
+		fail(err)
+		return
+	}
+	s.audit.Record(audit.Event{User: user, Operation: "mkdir", Path: child.String(), Outcome: audit.OK, Status: http.StatusSeeOther})
+	http.Redirect(w, r, folderHref(parent), http.StatusSeeOther)
+}
+
+// clashes reports whether the folder already holds a name that a case-insensitive
+// client (Windows, macOS) would treat as the same as name.
+func (s *server) clashes(dir resolver.Location, name string) bool {
+	entries, err := dir.ReadDir()
+	if err != nil {
+		return false
+	}
+	want := mounts.Fold(name)
+	for _, e := range entries {
+		if mounts.Fold(e.Name) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *server) refuseCreate(w http.ResponseWriter, r *http.Request, user string, p resolver.Path, err error) {
+	status, key := statusOf(err), "error.not_found"
+	switch {
+	case errors.Is(err, errExists):
+		status, key = http.StatusConflict, "error.exists"
+	case errors.Is(err, errForbidden):
+		key = "error.no_write"
+	case errors.Is(err, resolver.ErrInvalidName):
+		key = "error.bad_name"
+	case status == http.StatusBadRequest:
+		key = "error.bad_path"
+	case status == http.StatusInternalServerError:
+		s.Log.Error("mkdir", "err", err)
+		s.errorPage(w, r, status, "error.internal")
+		return
+	}
+	if status == http.StatusNotFound { // routine misses are not audited, like browse
+		s.errorPage(w, r, status, key)
+		return
+	}
+	ev := audit.Event{User: user, Operation: "mkdir", Outcome: audit.Refused, Status: status}
+	if !errors.Is(err, resolver.ErrInvalidPath) || errors.Is(err, resolver.ErrInvalidName) {
+		ev.Path = p.String() // only a syntactically valid Path is ever recorded
+	}
+	s.audit.Record(ev)
+	s.errorPage(w, r, status, key)
+}

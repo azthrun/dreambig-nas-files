@@ -51,9 +51,22 @@ func (s *server) filesRoute(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
 		s.browse(w, r)
+	case http.MethodPost:
+		s.filesPost(w, r)
 	default:
-		w.Header().Set("Allow", "GET, HEAD")
+		w.Header().Set("Allow", "GET, HEAD, POST")
 		s.errorPage(w, r, http.StatusMethodNotAllowed, "error.method")
+	}
+}
+
+// filesPost dispatches POST /files/<Path> by the form field op. Later tickets add their
+// plain-form operations here.
+func (s *server) filesPost(w http.ResponseWriter, r *http.Request) {
+	switch r.PostFormValue("op") {
+	case "mkdir":
+		s.mkdir(w, r)
+	default:
+		s.errorPage(w, r, http.StatusBadRequest, "error.method")
 	}
 }
 
