@@ -1,0 +1,24 @@
+{{template "header" .}}
+{{with .Browse}}<nav class="crumbs" aria-label="{{t $.Lang "browse.location"}}"><ol>
+{{range $i, $c := .Crumbs}}<li>{{if eq (len (slice $.Browse.Crumbs $i)) 1}}<span aria-current="page">{{$c.Name}}</span>{{else}}<a href="{{$c.Href}}">{{$c.Name}}</a>{{end}}</li>
+{{end}}</ol>{{if .ReadOnly}} <span class="tag">{{t $.Lang "root.read_only"}}</span>{{end}}</nav>
+{{if .Empty}}<p class="empty">{{t $.Lang "browse.empty"}}</p>
+{{else}}<table class="files">
+<thead><tr>
+{{range .Columns}}<th scope="col"{{if .Current}} aria-sort="ascending"{{end}}><a href="{{.Href}}">{{t $.Lang .Label}}</a>{{if .Current}} <span aria-hidden="true">{{.Arrow}}</span>{{end}}</th>
+{{end}}</tr></thead>
+<tbody>
+{{range .Entries}}<tr class="{{if .IsDir}}dir{{else}}file{{end}}">
+<td class="name">{{if .Href}}<a href="{{.Href}}">{{.Name}}</a>{{else}}<span>{{.Name}}</span>{{end}}</td>
+<td class="size">{{.Size}}</td>
+<td class="modified"><time datetime="{{.ISO}}">{{.Modified}}</time></td>
+</tr>
+{{end}}</tbody>
+</table>
+{{if gt .Pages 1}}<nav class="pager" aria-label="{{t $.Lang "browse.pages"}}">
+{{if .PrevHref}}<a href="{{.PrevHref}}" rel="prev">{{t $.Lang "browse.prev"}}</a>{{end}}
+<span>{{t $.Lang "browse.page_of" .Page .Pages}}</span>
+{{if .NextHref}}<a href="{{.NextHref}}" rel="next">{{t $.Lang "browse.next"}}</a>{{end}}
+</nav>
+{{end}}{{end}}{{end}}
+{{template "footer" .}}
