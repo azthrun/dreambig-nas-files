@@ -43,7 +43,7 @@ func Status(err error) int {
 	switch {
 	case err == nil:
 		return http.StatusOK
-	case errors.Is(err, ErrInvalidPath):
+	case errors.Is(err, ErrInvalidPath), errors.Is(err, ErrInvalidName):
 		return http.StatusBadRequest
 	case errors.Is(err, ErrHidden), errors.Is(err, ErrOutsideRoot), errors.Is(err, ErrNotFound), errors.Is(err, ErrNotFolder):
 		return http.StatusNotFound
