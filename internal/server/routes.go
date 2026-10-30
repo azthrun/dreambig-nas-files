@@ -58,11 +58,19 @@ func (s *server) filesRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 // filesPost dispatches POST /files/<Path> by the form field op. Later tickets add their
-// plain-form operations here.
+// plain-form operations here. op=zip is the browse selection form's download button
+// (names= checkboxes of the folder in the URL); #10's delete shares that form.
 func (s *server) filesPost(w http.ResponseWriter, r *http.Request) {
 	switch r.PostFormValue("op") {
 	case "mkdir":
 		s.mkdir(w, r)
+	case "zip":
+		p, err := pathFromRequest(r)
+		if err != nil {
+			s.refuseBrowse(w, r, sessionOf(r).User, p, err)
+			return
+		}
+		s.zipSelection(w, r, sessionOf(r).User, p)
 	default:
 		s.errorPage(w, r, http.StatusBadRequest, "error.method")
 	}
