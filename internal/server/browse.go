@@ -45,6 +45,7 @@ type browseView struct {
 	ReadOnly bool
 	Action   string // the selection form posts here (this folder)
 	ZipHref  string // GET: the whole folder as a zip
+	MkdirURL string // where the create-folder form posts; shown only when !ReadOnly
 	Empty    bool
 	Page     int
 	Pages    int
@@ -112,6 +113,7 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 		ReadOnly: !s.canWriteIn(user, loc),
 		Action:   folderHref(p),
 		ZipHref:  folderHref(p) + "?zip=1",
+		MkdirURL: folderHref(p),
 		Empty:    len(entries) == 0,
 		Page:     cur,
 		Pages:    pages,

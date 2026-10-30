@@ -95,15 +95,15 @@ func TestFolderZipIsStoreOnlyWithUTF8Names(t *testing.T) {
 func TestSelectionZipsOnlyTheChosenItems(t *testing.T) {
 	e := zipEnv(t)
 	c := e.SignIn("bob") // read Access may select
-	rec := c.Post("/files/docs/proj", url.Values{"action": {"zip"}, "names": {"a.txt", "sub"}})
+	rec := c.Post("/files/docs/proj", url.Values{"op": {"zip"}, "names": {"a.txt", "sub"}})
 	got, _ := readZip(t, rec)
 	if strings.Join(names(got), "|") != "a.txt|sub/|sub/b.txt" {
 		t.Errorf("entries = %q", names(got))
 	}
-	if rec := c.PostWithoutCSRF("/files/docs/proj", url.Values{"action": {"zip"}, "names": {"a.txt"}}); rec.Code != 403 {
+	if rec := c.PostWithoutCSRF("/files/docs/proj", url.Values{"op": {"zip"}, "names": {"a.txt"}}); rec.Code != 403 {
 		t.Errorf("no CSRF = %d", rec.Code)
 	}
-	if rec := c.Post("/files/docs/proj", url.Values{"action": {"zip"}}); rec.Code != 400 {
+	if rec := c.Post("/files/docs/proj", url.Values{"op": {"zip"}}); rec.Code != 400 {
 		t.Errorf("empty selection = %d", rec.Code)
 	}
 }

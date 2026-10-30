@@ -2,10 +2,17 @@
 {{with .Browse}}<nav class="crumbs" aria-label="{{t $.Lang "browse.location"}}"><ol>
 {{range $i, $c := .Crumbs}}<li>{{if eq (len (slice $.Browse.Crumbs $i)) 1}}<span aria-current="page">{{$c.Name}}</span>{{else}}<a href="{{$c.Href}}">{{$c.Name}}</a>{{end}}</li>
 {{end}}</ol>{{if .ReadOnly}} <span class="tag">{{t $.Lang "root.read_only"}}</span>{{end}}</nav>
-{{if .Empty}}<p class="empty">{{t $.Lang "browse.empty"}}</p>
+{{if not .ReadOnly}}<form class="mkdir" method="post" action="{{.MkdirURL}}">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<input type="hidden" name="op" value="mkdir">
+<label>{{t $.Lang "browse.folder_name"}} <input type="text" name="name" required maxlength="255" autocomplete="off"></label>
+<button type="submit">{{t $.Lang "browse.create_folder"}}</button>
+</form>
+{{end}}{{if .Empty}}<p class="empty">{{t $.Lang "browse.empty"}}</p>
 {{else}}<p class="actions"><a href="{{.ZipHref}}">{{t $.Lang "browse.zip_folder"}}</a></p>
 {{/* One selection form for every row action; each action is a submit button named
-     "action" (zip now; delete from #10). Plain HTML, works with JS off. */}}
+     "op" (zip here; delete from #10). Plain HTML, works with JS off, and read-only
+     Users get it too (a download is not a write). */}}
 <form method="post" action="{{.Action}}" class="selection">
 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
 <table class="files">
@@ -22,7 +29,7 @@
 </tr>
 {{end}}</tbody>
 </table>
-<p class="actions"><button type="submit" name="action" value="zip">{{t $.Lang "browse.zip_selected"}}</button></p>
+<p class="actions"><button type="submit" name="op" value="zip">{{t $.Lang "browse.zip_selected"}}</button></p>
 </form>
 {{if gt .Pages 1}}<nav class="pager" aria-label="{{t $.Lang "browse.pages"}}">
 {{if .PrevHref}}<a href="{{.PrevHref}}" rel="prev">{{t $.Lang "browse.prev"}}</a>{{end}}

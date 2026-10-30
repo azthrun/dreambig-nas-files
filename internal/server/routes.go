@@ -57,22 +57,22 @@ func (s *server) filesRoute(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// filesPost handles the browse table's one selection form: POST /files/<folder> with an
-// action field naming the submit button. CSRF is already enforced by s.protected. Other
-// tickets add their actions (delete, ...) to this switch; they share the names=
-// checkboxes.
+// filesPost dispatches POST /files/<Path> by the form field op. Later tickets add their
+// plain-form operations here. op=zip is the browse selection form's download button
+// (names= checkboxes of the folder in the URL); #10's delete shares that form.
 func (s *server) filesPost(w http.ResponseWriter, r *http.Request) {
-	user := sessionOf(r).User
-	p, err := pathFromRequest(r)
-	if err != nil {
-		s.refuseBrowse(w, r, user, p, err)
-		return
-	}
-	switch r.PostFormValue("action") {
+	switch r.PostFormValue("op") {
+	case "mkdir":
+		s.mkdir(w, r)
 	case "zip":
-		s.zipSelection(w, r, user, p)
+		p, err := pathFromRequest(r)
+		if err != nil {
+			s.refuseBrowse(w, r, sessionOf(r).User, p, err)
+			return
+		}
+		s.zipSelection(w, r, sessionOf(r).User, p)
 	default:
-		s.errorPage(w, r, http.StatusBadRequest, "error.bad_path")
+		s.errorPage(w, r, http.StatusBadRequest, "error.method")
 	}
 }
 

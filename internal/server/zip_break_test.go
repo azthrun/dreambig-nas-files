@@ -25,7 +25,7 @@ func TestZipExcludesHiddenEntriesAndEverythingWithoutAccess(t *testing.T) {
 	for i, req := range []func() *httptest.ResponseRecorder{
 		func() *httptest.ResponseRecorder { return c.Get("/files/docs/proj?zip=1") },
 		func() *httptest.ResponseRecorder {
-			return c.Post("/files/docs", url.Values{"action": {"zip"}, "names": {"proj", "@eaDir", ".nas-files-trash", "nope"}})
+			return c.Post("/files/docs", url.Values{"op": {"zip"}, "names": {"proj", "@eaDir", ".nas-files-trash", "nope"}})
 		},
 	} {
 		got, _ := readZip(t, req())
@@ -63,10 +63,10 @@ func TestZipRefusalsLookLikeNotFound(t *testing.T) {
 	if rec := c.Get("/files/secret?zip=1"); rec.Code != 404 {
 		t.Errorf("folder without Access = %d", rec.Code)
 	}
-	if rec := c.Post("/files/secret", url.Values{"action": {"zip"}, "names": {"s.txt"}}); rec.Code != 404 {
+	if rec := c.Post("/files/secret", url.Values{"op": {"zip"}, "names": {"s.txt"}}); rec.Code != 404 {
 		t.Errorf("selection without Access = %d", rec.Code)
 	}
-	if rec := c.Post("/files/docs", url.Values{"action": {"zip"}, "names": {"../secret/s.txt", "a/b"}}); rec.Code != 404 {
+	if rec := c.Post("/files/docs", url.Values{"op": {"zip"}, "names": {"../secret/s.txt", "a/b"}}); rec.Code != 404 {
 		t.Errorf("traversal names = %d", rec.Code)
 	}
 	if rec := c.Get("/files/docs/proj/a.txt?zip=1"); rec.Code != 200 || rec.Body.String() != "aaa" {

@@ -16,7 +16,7 @@ func TestBrowseOffersSelectionAndZipToReadOnlyUsers(t *testing.T) {
 		`name="csrf_token"`,
 		`type="checkbox" name="names" value="a.txt"`,
 		`type="checkbox" name="names" value="sub"`,
-		`name="action" value="zip"`,
+		`name="op" value="zip"`,
 		`href="/files/docs/proj?zip=1"`,
 		"Download selected as zip",
 	} {
