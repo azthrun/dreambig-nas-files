@@ -18,9 +18,13 @@ type Client struct {
 	// CSRF is the signed-in session's token as read from the Root page, empty for an
 	// Anonymous client.
 	CSRF string
+	// AcceptLanguage is sent as the Accept-Language header when set, like a browser's
+	// language setting.
+	AcceptLanguage string
 
 	e      *Env
 	cookie *http.Cookie
+	lang   string // the language cookie the browser would have saved
 	addr   string
 }
 
@@ -73,8 +77,19 @@ func (c *Client) do(r *http.Request) *httptest.ResponseRecorder {
 	if c.cookie != nil {
 		r.AddCookie(&http.Cookie{Name: c.cookie.Name, Value: c.cookie.Value})
 	}
+	if c.AcceptLanguage != "" {
+		r.Header.Set("Accept-Language", c.AcceptLanguage)
+	}
+	if c.lang != "" {
+		r.AddCookie(&http.Cookie{Name: "nas_files_lang", Value: c.lang})
+	}
 	rec := c.e.Do(r)
 	c.keepCookie(rec)
+	for _, ck := range rec.Result().Cookies() {
+		if ck.Name == "nas_files_lang" {
+			c.lang = ck.Value
+		}
+	}
 	return rec
 }
 

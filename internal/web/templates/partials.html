@@ -10,6 +10,7 @@
 <body>
 <header class="bar">
 <strong>{{t .Lang "app.name"}}</strong>
+<nav class="lang" aria-label="{{t .Lang "nav.language"}}">{{range .LangLinks}}{{if .Current}}<span aria-current="true" lang="{{.Code}}">{{t $.Lang (printf "lang.%s" .Code)}}</span>{{else}}<a href="{{.Href}}" lang="{{.Code}}" hreflang="{{.Code}}">{{t $.Lang (printf "lang.%s" .Code)}}</a>{{end}} {{end}}</nav>
 {{if .User}}<span class="who">{{t .Lang "root.signed_in_as" .User}}</span>
 <form method="post" action="/logout">
 <input type="hidden" name="csrf_token" value="{{.CSRF}}">
