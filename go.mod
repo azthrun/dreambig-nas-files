@@ -14,3 +14,5 @@ require (
 	// and macOS clients send NFD names.
 	golang.org/x/text v0.43.0
 )
+
+require github.com/tus/tusd/v2 v2.10.1 // indirect
