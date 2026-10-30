@@ -1,50 +1,64 @@
-// Package i18n looks up every UI string by key. Handlers and templates never contain
-// literal user-facing text; they call T (templates: the "t" function). Ticket #6 turns
-// the catalogs map into real per-language catalogs and picks the language per request;
-// until then there is only English.
+// Package i18n looks up every UI string by key and formats dates and sizes per language.
+// Handlers and templates never contain literal user-facing text; they call T (templates:
+// the "t" function).
 //
-// Add new strings to the English catalog in this file, one key per string, named
-// "<area>.<what>" (for example "signin.failed"). Values are fmt format strings.
+// Languages are "en" and "zh-Hans". Every key must exist in every catalog: a test fails
+// when one is missing in either direction, so a ticket that adds a string adds it to
+// catalog_en.go AND catalog_zh.go, one key per string, named "<area>.<what>" (for
+// example "signin.failed"). Values are fmt format strings with the same verbs in every
+// language.
 package i18n
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+)
 
 // Default is the language used when none is chosen or a key is missing from a language.
 const Default = "en"
 
+// Chinese is the Simplified Chinese language tag.
+const Chinese = "zh-Hans"
+
+// CookieName is the cookie that remembers the manual language choice.
+const CookieName = "nas_files_lang"
+
 var catalogs = map[string]map[string]string{
-	Default: {
-		"app.name":           "NAS Files",
-		"nav.sign_out":       "Sign out",
-		"signin.title":       "Sign in",
-		"signin.name":        "Name",
-		"signin.password":    "Password",
-		"signin.submit":      "Sign in",
-		"signin.failed":      "Sign-in failed. Check the name and password and try again.",
-		"root.title":         "Files",
-		"root.signed_in_as":  "Signed in as %s",
-		"root.mounts":        "Folders",
-		"root.no_mounts":     "No folders are available.",
-		"root.read_only":     "read-only",
-		"browse.location":    "Location",
-		"browse.name":        "Name",
-		"browse.size":        "Size",
-		"browse.modified":    "Modified",
-		"browse.empty":       "This folder is empty.",
-		"browse.pages":       "Pages",
-		"browse.prev":        "Previous",
-		"browse.next":        "Next",
-		"browse.page_of":     "Page %d of %d",
-		"error.bad_path":     "That address is not valid.",
-		"error.method":       "That action is not available here.",
-		"error.forbidden":    "Your request was refused. Reload the page and try again.",
-		"error.title":        "Error",
-		"error.not_found":    "Not found.",
-		"error.unauthorized": "Sign in to continue.",
-		"error.too_many":     "Too many attempts. Wait a while and try again.",
-		"error.internal":     "Something went wrong.",
-	},
+	Default: english,
+	Chinese: chinese,
 }
+
+// Languages lists the supported languages, English first.
+func Languages() []string {
+	out := []string{Default}
+	var rest []string
+	for l := range catalogs {
+		if l != Default {
+			rest = append(rest, l)
+		}
+	}
+	sort.Strings(rest)
+	return append(out, rest...)
+}
+
+// Supported reports whether lang is a language with a catalog.
+func Supported(lang string) bool { _, ok := catalogs[lang]; return ok }
+
+// Keys lists the keys of lang's catalog, sorted. Used by the catalog tests.
+func Keys(lang string) []string {
+	var out []string
+	for k := range catalogs[lang] {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Text returns the raw catalog text for key in exactly lang, empty if it has none.
+func Text(lang, key string) string { return catalogs[lang][key] }
 
 // T returns the text for key in lang, formatted with args. A key missing from lang falls
 // back to the Default language; a key missing everywhere comes back as the key itself,
@@ -61,4 +75,64 @@ func T(lang, key string, args ...any) string {
 		return s
 	}
 	return fmt.Sprintf(s, args...)
+}
+
+// Resolve picks the language for a request: a saved cookie value first, then the
+// Accept-Language header (by q-value; any Chinese variant maps to Simplified), then
+// English.
+func Resolve(cookie, acceptLanguage string) string {
+	if Supported(cookie) {
+		return cookie
+	}
+	best, bestQ := "", 0.0
+	for _, part := range strings.Split(acceptLanguage, ",") {
+		tag, params, _ := strings.Cut(strings.TrimSpace(part), ";")
+		q := 1.0
+		if v, ok := strings.CutPrefix(strings.TrimSpace(params), "q="); ok {
+			f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+			if err != nil {
+				continue
+			}
+			q = f
+		}
+		primary, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(tag)), "-")
+		var lang string
+		switch primary {
+		case "en":
+			lang = Default
+		case "zh":
+			lang = Chinese
+		default:
+			continue
+		}
+		if q > bestQ { // ties keep the earlier (more preferred) entry
+			best, bestQ = lang, q
+		}
+	}
+	if best == "" {
+		return Default
+	}
+	return best
+}
+
+// FormatSize writes a byte count with 1024-based units, in lang's wording.
+func FormatSize(lang string, n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d %s", n, T(lang, "unit.bytes"))
+	}
+	f, suffix := float64(n), ""
+	for _, suffix = range []string{"KB", "MB", "GB", "TB"} {
+		f /= unit
+		if f < unit {
+			break
+		}
+	}
+	return fmt.Sprintf("%.1f %s", f, suffix)
+}
+
+// FormatTime writes t (in UTC) as date and minute in lang's usual order; the layout is
+// the catalog entry "format.datetime".
+func FormatTime(lang string, t time.Time) string {
+	return t.UTC().Format(T(lang, "format.datetime"))
 }
