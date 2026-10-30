@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"io/fs"
 	"net/http"
 	"slices"
 	"strconv"
@@ -23,7 +24,7 @@ type crumb struct {
 
 type entryView struct {
 	Name     string
-	Href     string // folders link to their listing; files have none until download (#7)
+	Href     string // folders open their listing; files download
 	IsDir    bool
 	Size     string
 	Modified string
@@ -76,7 +77,12 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 	var entries []resolver.Entry
 	if err == nil {
 		if err = s.authorize(user, loc, access.Read); err == nil {
-			if _, err = loc.Stat(); err == nil {
+			var fi fs.FileInfo
+			if fi, err = loc.Stat(); err == nil {
+				if !fi.IsDir() { // a file: download it
+					s.download(w, r, user, p, loc, fi)
+					return
+				}
 				entries, err = loc.ReadDir()
 			}
 		}
@@ -111,6 +117,9 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 			}
 			ev.Size = "-"
 		} else {
+			if child, err := p.Join(e.Name); err == nil {
+				ev.Href = folderHref(child) // a file's link downloads it
+			}
 			ev.Size = i18n.FormatSize(lang, e.Size)
 		}
 		v.Entries = append(v.Entries, ev)
