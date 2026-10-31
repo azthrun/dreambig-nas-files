@@ -5,15 +5,16 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
-	"github.com/azthrun/dreambig-nas-files/internal/access"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 
+	"github.com/azthrun/dreambig-nas-files/internal/access"
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/i18n"
 	"github.com/azthrun/dreambig-nas-files/internal/identity"
+	"github.com/azthrun/dreambig-nas-files/internal/limiter"
 	"github.com/azthrun/dreambig-nas-files/internal/resolver"
 	"github.com/azthrun/dreambig-nas-files/internal/upload"
 )
@@ -156,12 +157,12 @@ func (s *server) loginForm(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	name, password := r.PostFormValue("name"), r.PostFormValue("password")
-	keys := []string{userKey(name), ipKey(clientIP(r))}
 	fail := func(status int, key string) {
 		s.audit.Record(audit.Event{User: name, Operation: "signin", Outcome: audit.Refused, Status: status})
 		s.render(w, r, status, "login.html", page{Title: i18n.T(langOf(r), "signin.title"), Name: name, Error: i18n.T(langOf(r), key)})
 	}
-	if s.limiter.blocked(keys...) {
+	forgive, ok := s.limiter.Try(limiter.UserKey(name), limiter.IPKey(clientIP(r)))
+	if !ok {
 		fail(http.StatusTooManyRequests, "signin.failed")
 		return
 	}
@@ -170,11 +171,11 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		if !errors.Is(err, identity.ErrInvalidCredentials) {
 			s.Log.Error("authenticate", "err", err)
 		}
-		s.limiter.fail(keys...)
 		fail(http.StatusUnauthorized, "signin.failed")
 		return
 	}
-	token, _ := s.sessions.create(user.Name)
+	forgive()
+	token := s.sessions.create(user.Name)
 	setSessionCookie(w, token, int(sessionLifetime.Seconds()))
 	s.audit.Record(audit.Event{User: user.Name, Operation: "signin", Outcome: audit.OK, Status: http.StatusSeeOther})
 	http.Redirect(w, r, "/", http.StatusSeeOther)

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -243,5 +245,46 @@ func TestAuditNamesTheUserForSignInsAndRefusals(t *testing.T) {
 	}
 	if strings.Contains(e.Audit.String(), "wrong") {
 		t.Error("audit log contains a password")
+	}
+}
+
+// The limit must hold for requests that arrive together: the check and the count are one
+// step, or N parallel guesses all pass the check while the first ones are still hashing.
+func TestParallelGuessesCannotOutrunTheLimit(t *testing.T) {
+	const attempts = 20
+	var checked atomic.Int32
+	events, release := make(chan struct{}, 2*attempts), make(chan struct{})
+	e := testenv.New(t, testenv.Mount("docs"), testenv.BeforeAuthenticate(func() {
+		checked.Add(1)
+		events <- struct{}{}
+		<-release // every password check waits until the rest were refused or joined it
+	}))
+	var wg sync.WaitGroup
+	for range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			e.Anonymous().PostWithoutCSRF("/login", url.Values{"name": {testenv.DefaultUser}, "password": {"wrong"}})
+			events <- struct{}{}
+		}()
+	}
+	// Each request shows up here at least once, whether it reached the check or was refused.
+	for range attempts {
+		<-events
+	}
+	close(release)
+	wg.Wait()
+	if n := checked.Load(); n > 5 {
+		t.Errorf("%d passwords were checked, the limit is 5", n)
+	}
+}
+
+func TestSuccessfulSignInsDoNotCountAsFailures(t *testing.T) {
+	e := testenv.New(t, testenv.Mount("docs"))
+	for i := range 8 {
+		rec := e.Anonymous().PostWithoutCSRF("/login", url.Values{"name": {testenv.DefaultUser}, "password": {e.Password(testenv.DefaultUser)}})
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("sign-in %d = %d", i+1, rec.Code)
+		}
 	}
 }

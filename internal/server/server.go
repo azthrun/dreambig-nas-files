@@ -14,6 +14,7 @@ import (
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/clock"
 	"github.com/azthrun/dreambig-nas-files/internal/identity"
+	"github.com/azthrun/dreambig-nas-files/internal/limiter"
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
 	"github.com/azthrun/dreambig-nas-files/internal/resolver"
 	"github.com/azthrun/dreambig-nas-files/internal/trash"
@@ -49,7 +50,7 @@ type server struct {
 	Deps
 	audit    *audit.Logger // s.audit.Record(audit.Event{...}) is the one audit API
 	sessions *sessions
-	limiter  *limiter
+	limiter  *limiter.Limiter
 	tmpl     *template.Template
 	// res is the Path resolver: every request-supplied Path goes through it.
 	res *resolver.Resolver
@@ -93,7 +94,7 @@ func New(d Deps) (http.Handler, error) {
 		Deps:     d,
 		audit:    d.Audit,
 		sessions: newSessions(d.Clock),
-		limiter:  newLimiter(d.Clock),
+		limiter:  limiter.New(d.Clock),
 		tmpl:     tmpl,
 	}
 	up, err := upload.New(upload.Config{

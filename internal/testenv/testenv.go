@@ -62,15 +62,16 @@ func (e *Env) Password(name string) string {
 type Option func(*setup)
 
 type setup struct {
-	mounts    []string
-	readOnly  map[string]bool
-	users     []string
-	grants    map[string]map[string]string // user -> mount -> level
-	rawAcc    *string                      // AccessFile content
-	trashDays *int
-	expiry    *time.Duration
-	reserve   int64
-	freeSpace func(mount string) int64
+	mounts     []string
+	readOnly   map[string]bool
+	users      []string
+	grants     map[string]map[string]string // user -> mount -> level
+	rawAcc     *string                      // AccessFile content
+	trashDays  *int
+	expiry     *time.Duration
+	reserve    int64
+	freeSpace  func(mount string) int64
+	beforeAuth func()
 }
 
 // UploadExpiry sets how long an incomplete Upload may idle before the sweep removes it
@@ -88,6 +89,12 @@ func FreeSpaceReserve(n int64) Option {
 // free on its filesystem.
 func FreeSpace(fn func(mount string) int64) Option {
 	return func(s *setup) { s.freeSpace = fn }
+}
+
+// BeforeAuthenticate runs fn at the start of every password check, so a test can hold
+// sign-ins in the middle of the slow part.
+func BeforeAuthenticate(fn func()) Option {
+	return func(s *setup) { s.beforeAuth = fn }
 }
 
 // TrashRetention sets the Trash retention in days (default 30; 0 means never purge).
@@ -238,10 +245,24 @@ func TryNew(t testing.TB, opts ...Option) (*Env, error) {
 	}
 	e.kc = kc
 	e.deps = server.Deps{Mounts: e.Mounts, Clock: e.Clock, Audit: auditLog, Auth: auth, Access: acc, Trash: tr}
+	if s.beforeAuth != nil {
+		e.deps.Auth = hookedAuth{auth, s.beforeAuth}
+	}
 	if err := e.Restart(); err != nil {
 		return nil, err
 	}
 	return e, nil
+}
+
+// hookedAuth calls before ahead of every password check.
+type hookedAuth struct {
+	identity.Authenticator
+	before func()
+}
+
+func (a hookedAuth) Authenticate(name, password string) (identity.User, error) {
+	a.before()
+	return a.Authenticator.Authenticate(name, password)
 }
 
 // Restart stops the application and starts it again on the same folders, as when the
