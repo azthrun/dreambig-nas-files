@@ -98,8 +98,10 @@ func Discover(root string, opts Options) ([]Mount, error) {
 			if !errors.Is(werr, unix.EROFS) && !mountedReadOnly(real) {
 				m.Warning = fmt.Sprintf("Mount %q is not writable by the service's user, so it is read-only; mount it :ro or grant the user Read/Write in DSM", name)
 			}
-		} else if err := probeHardLinks(real, opts.Link); err != nil {
+		} else if warn, err := probeHardLinks(real, opts.Link); err != nil {
 			return nil, fmt.Errorf("Mount %q: %w", name, err)
+		} else if warn != "" {
+			m.Warning = fmt.Sprintf("Mount %q: %s", name, warn)
 		}
 		out = append(out, m)
 	}
@@ -109,31 +111,53 @@ func Discover(root string, opts Options) ([]Mount, error) {
 	return out, nil
 }
 
+// probeFilePrefix names the probe's files. The Staging Area copy is Hidden by its
+// folder; the link in the Mount's own folder starts with "@", a Hidden Entry name, so a
+// crash can never leave a file Users see. Startup clears older ones.
+const probeFilePrefix = "probe-"
+const probeLinkPrefix = "@nas-files-probe-"
+
+// noLink reports an error that says the filesystem cannot make hard links, as opposed to
+// one that merely stopped the probe (full disk, denied create).
+func noLink(err error) bool {
+	return errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.EOPNOTSUPP)
+}
+
 // probeHardLinks checks that Uploads can complete in the writable Mount at dir: an
 // Upload waits in the Staging Area and is hard-linked into place, so a filesystem that
 // cannot link would fail every Upload after its data had travelled. It links a file from
 // the Staging Area into the Mount's own folder and removes everything it made, including
 // the Staging Area when it had to create it.
-func probeHardLinks(dir string, link func(old, new string) error) (err error) {
+//
+// Only a genuine no-link answer is an error. Any other trouble means the probe could not
+// run, which says nothing about the filesystem: it comes back as a warning.
+func probeHardLinks(dir string, link func(old, new string) error) (warning string, err error) {
 	if link == nil {
 		link = os.Link
+	}
+	unchecked := func(why string, cause error) string {
+		if cause != nil {
+			why += ": " + scrub.Path(cause).Error()
+		}
+		return "could not check that the filesystem supports hard links, which Uploads need (" + why + "); Uploads may fail"
 	}
 	staging := filepath.Join(dir, StagingDir)
 	created := false
 	if merr := os.Mkdir(staging, 0o700); merr == nil {
 		created = true
 	} else if !errors.Is(merr, os.ErrExist) {
-		return fmt.Errorf("cannot create its Staging Area: %w", scrub.Path(merr))
+		return unchecked("cannot create its Staging Area", merr), nil
 	}
 	if fi, lerr := os.Lstat(staging); lerr != nil || !fi.IsDir() {
-		return errors.New("its Staging Area is not a folder; remove it from the Mount")
+		return unchecked("its Staging Area is not a folder; remove it from the Mount", nil), nil
 	}
+	clearStaleProbes(dir, staging)
 	var tag [8]byte
 	if _, rerr := rand.Read(tag[:]); rerr != nil {
-		return fmt.Errorf("probe hard links: %w", rerr)
+		return unchecked("no random name", rerr), nil
 	}
-	src := filepath.Join(staging, "probe-"+hex.EncodeToString(tag[:]))
-	dst := filepath.Join(dir, ".nas-files-probe-"+hex.EncodeToString(tag[:]))
+	src := filepath.Join(staging, probeFilePrefix+hex.EncodeToString(tag[:]))
+	dst := filepath.Join(dir, probeLinkPrefix+hex.EncodeToString(tag[:]))
 	defer func() {
 		_ = os.Remove(dst)
 		_ = os.Remove(src)
@@ -142,12 +166,30 @@ func probeHardLinks(dir string, link func(old, new string) error) (err error) {
 		}
 	}()
 	if werr := os.WriteFile(src, nil, 0o600); werr != nil {
-		return fmt.Errorf("cannot write to its Staging Area: %w", scrub.Path(werr))
+		return unchecked("cannot write to its Staging Area", werr), nil
 	}
 	if lerr := link(src, dst); lerr != nil {
-		return fmt.Errorf("the filesystem does not support hard links, which Uploads use to complete without overwriting a file: %w", scrub.Path(lerr))
+		if noLink(lerr) {
+			return "", fmt.Errorf("the filesystem does not support hard links, which Uploads use to complete without overwriting a file: %w", scrub.Path(lerr))
+		}
+		return unchecked("the probe link failed", lerr), nil
 	}
-	return nil
+	return "", nil
+}
+
+// clearStaleProbes removes probe files an earlier run left behind by crashing.
+func clearStaleProbes(dir, staging string) {
+	for _, d := range []struct{ dir, prefix string }{{dir, probeLinkPrefix}, {staging, probeFilePrefix}} {
+		ents, err := os.ReadDir(d.dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range ents {
+			if strings.HasPrefix(e.Name(), d.prefix) && e.Type().IsRegular() {
+				_ = os.Remove(filepath.Join(d.dir, e.Name()))
+			}
+		}
+	}
 }
 
 func deviceOf(info os.FileInfo) (uint64, bool) {
