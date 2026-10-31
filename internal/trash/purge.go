@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
+	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 )
 
 // purgingSuffix marks a Trash folder that was set aside to be removed. A crash can leave
@@ -28,8 +29,9 @@ const purgingSuffix = ".purging"
 func (t *Trash) Purge() {
 	for _, a := range t.setAside() {
 		outcome := audit.OK
-		if err := t.cfg.RemoveAll(a.root, a.aside); err != nil {
+		if err := t.cfg.RemoveAll(a.root, a.moved); err != nil {
 			outcome = audit.Failed
+			t.logFailure(a.mount, err)
 		}
 		t.record(a.mount, a.orig, outcome)
 	}
@@ -40,7 +42,7 @@ type aside struct {
 	mount string
 	root  *os.Root
 	orig  string // where it was: TrashDir/<date>
-	aside string // where it is now: orig + purgingSuffix
+	moved string // where it is now: orig + purgingSuffix
 }
 
 // setAside renames every expired dated folder to its set-aside name, under the write
@@ -61,12 +63,14 @@ func (t *Trash) setAside() []aside {
 		}
 		if err != nil {
 			t.record(m.Name, TrashDir, audit.Failed)
+			t.logFailure(m.Name, err)
 			continue
 		}
 		des, err := f.ReadDir(-1)
 		_ = f.Close()
 		if err != nil {
 			t.record(m.Name, TrashDir, audit.Failed)
+			t.logFailure(m.Name, err)
 			continue
 		}
 		for _, de := range des {
@@ -89,6 +93,7 @@ func (t *Trash) setAside() []aside {
 			moved := orig + purgingSuffix
 			if err := root.Rename(orig, moved); err != nil {
 				t.record(m.Name, orig, audit.Failed)
+				t.logFailure(m.Name, err)
 				continue
 			}
 			out = append(out, aside{m.Name, root, orig, moved})
@@ -101,6 +106,11 @@ func (t *Trash) setAside() []aside {
 func dateOnly(t time.Time) time.Time {
 	y, m, d := t.Date()
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
+// logFailure keeps the cause of a failed purge, which the audit line has no room for.
+func (t *Trash) logFailure(mount string, err error) {
+	t.cfg.Log.Error("trash purge", "mount", mount, "err", scrub.Path(err))
 }
 
 func (t *Trash) record(mount, rel string, outcome audit.Outcome) {

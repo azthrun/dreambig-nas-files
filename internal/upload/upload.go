@@ -39,6 +39,7 @@ import (
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
 	"github.com/azthrun/dreambig-nas-files/internal/resolver"
+	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 )
 
 // BasePath is where the tus endpoint is mounted.
@@ -570,7 +571,7 @@ func (h *Handler) tusError(ctx context.Context, err error) error {
 	case http.StatusNotFound:
 		return errNotFound
 	}
-	h.Log.ErrorContext(ctx, "upload", "err", err)
+	h.Log.ErrorContext(ctx, "upload", "err", scrub.Path(err))
 	return errInternal
 }
 

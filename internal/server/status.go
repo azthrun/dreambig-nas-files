@@ -7,6 +7,7 @@ import (
 
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/resolver"
+	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 	"github.com/azthrun/dreambig-nas-files/internal/trash"
 )
 
@@ -70,7 +71,7 @@ func (s *server) refuse(w http.ResponseWriter, r *http.Request, op, user, path s
 	}
 	switch {
 	case ref.Status == http.StatusInternalServerError:
-		s.Log.Error(op, "err", err)
+		s.Log.Error(op, "err", scrub.Path(err))
 		ev.Outcome = audit.Failed
 	case routineMiss && isPlainMiss(err):
 		s.errorPage(w, r, ref.Status, ref.Key)

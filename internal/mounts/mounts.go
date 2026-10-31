@@ -35,6 +35,32 @@ type Mount struct {
 	Warning string
 }
 
+// Roots holds one os.Root per Mount, by Mount.Name.
+type Roots map[string]*os.Root
+
+// OpenRoots opens every Mount's os.Root. Close them when done.
+func OpenRoots(ms []Mount) (Roots, error) {
+	roots := Roots{}
+	for _, m := range ms {
+		root, err := os.OpenRoot(m.Path)
+		if err != nil {
+			_ = roots.Close()
+			return nil, fmt.Errorf("open Mount %q: %w", m.Name, scrub.Path(err))
+		}
+		roots[m.Name] = root
+	}
+	return roots, nil
+}
+
+// Close releases every os.Root.
+func (r Roots) Close() error {
+	var errs []error
+	for _, root := range r {
+		errs = append(errs, root.Close())
+	}
+	return errors.Join(errs...)
+}
+
 // Options controls Discover.
 type Options struct {
 	// RequireMountPoints refuses a folder that is not its own mount point. Keep it on

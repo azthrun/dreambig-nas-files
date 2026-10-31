@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -22,31 +23,20 @@ import (
 // escape that Mount.
 type Resolver struct {
 	mounts []mounts.Mount
-	roots  map[string]*os.Root // by Mount.Name
+	roots  mounts.Roots
 }
 
 // New opens a Resolver over the Mounts from mounts.Discover. Close it when done.
 func New(ms []mounts.Mount) (*Resolver, error) {
-	r := &Resolver{mounts: ms, roots: map[string]*os.Root{}}
-	for _, m := range ms {
-		root, err := os.OpenRoot(m.Path)
-		if err != nil {
-			_ = r.Close()
-			return nil, fmt.Errorf("open Mount %q: %w", m.Name, err)
-		}
-		r.roots[m.Name] = root
+	roots, err := mounts.OpenRoots(ms)
+	if err != nil {
+		return nil, err
 	}
-	return r, nil
+	return &Resolver{mounts: ms, roots: roots}, nil
 }
 
 // Close releases every Mount's os.Root.
-func (r *Resolver) Close() error {
-	var errs []error
-	for _, root := range r.roots {
-		errs = append(errs, root.Close())
-	}
-	return errors.Join(errs...)
-}
+func (r *Resolver) Close() error { return r.roots.Close() }
 
 // Location is a validated Path resolved against the filesystem. Hand it to code that
 // does I/O; never build an OS path from a request string any other way.
@@ -125,23 +115,33 @@ func (r *Resolver) Resolve(p Path) (Location, error) {
 // while its link (built from the NFC name we show) is NFC. For each segment: the exact
 // name wins; otherwise the folder entry whose name normalises to the segment is used.
 // Segments that match nothing are kept as requested (a missing target). Only names are
-// read here; locate still resolves, bounds and Hidden-checks the result.
+// read here, always through an os.Root, so nothing outside the Mounts is looked at: a
+// symlink is followed only after locate has bounded it. locate still resolves, bounds and
+// Hidden-checks the final result.
 func (r *Resolver) diskNames(mount mounts.Mount, segs []string) []string {
 	out := make([]string, 0, len(segs))
-	dir := mount.Path
+	root, dir := r.roots[mount.Name], "."
 	for i, seg := range segs {
 		name := seg
 		if !isASCII(seg) {
-			if _, err := os.Lstat(filepath.Join(dir, seg)); err != nil {
-				if got, ok := normalisedMatch(dir, seg); ok {
+			if _, err := root.Lstat(path.Join(dir, seg)); err != nil {
+				if got, ok := normalisedMatch(root, dir, seg); ok {
 					name = got
 				}
 			}
 		}
 		out = append(out, name)
-		dir = filepath.Join(dir, name)
-		if _, err := os.Stat(dir); err != nil { // nothing deeper can exist
+		dir = path.Join(dir, name)
+		fi, err := root.Lstat(dir)
+		if err != nil { // nothing deeper can exist
 			return append(out, segs[i+1:]...)
+		}
+		if fi.Mode()&fs.ModeSymlink != 0 {
+			loc, err := r.locate(mount, out)
+			if err != nil || !loc.Exists { // the same answer locate gives the whole Path
+				return append(out, segs[i+1:]...)
+			}
+			root, dir = r.roots[loc.Mount.Name], loc.Rel()
 		}
 	}
 	return out
@@ -156,9 +156,14 @@ func isASCII(s string) bool {
 	return true
 }
 
-// normalisedMatch finds the entry of dir whose NFC form is want.
-func normalisedMatch(dir, want string) (string, bool) {
-	des, err := os.ReadDir(dir)
+// normalisedMatch finds the entry of dir (inside root) whose NFC form is want.
+func normalisedMatch(root *os.Root, dir, want string) (string, bool) {
+	f, err := root.Open(dir)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+	des, err := f.ReadDir(-1)
 	if err != nil {
 		return "", false
 	}
@@ -273,11 +278,35 @@ func mapIO(err error) error {
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) || errors.Is(err, syscall.ELOOP) {
 		return ErrNotFound
 	}
-	// os.Root refuses a path that escapes its Mount with a plain error.
-	if strings.Contains(err.Error(), "escapes") {
+	if IsEscape(err) {
 		return ErrOutsideRoot
 	}
 	return fmt.Errorf("io: %w", scrub.Path(err))
+}
+
+// IsEscape reports os.Root refusing a path that escapes its Mount, which it does with a
+// plain error.
+func IsEscape(err error) bool { return strings.Contains(err.Error(), "escapes") }
+
+// DiskNames maps the NFC names of the folder's entries to the names stored on disk.
+func (l Location) DiskNames() (map[string]string, error) {
+	f, err := l.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	des, err := f.ReadDir(-1)
+	if err != nil {
+		return nil, fmt.Errorf("read folder: %w", scrub.Path(err))
+	}
+	out := make(map[string]string, len(des))
+	for _, de := range des {
+		nfc := norm.NFC.String(de.Name())
+		if _, dup := out[nfc]; !dup || nfc == de.Name() {
+			out[nfc] = de.Name()
+		}
+	}
+	return out, nil
 }
 
 // Entry is one visible item in a folder.

@@ -37,7 +37,7 @@ type Config struct {
 	RetentionDays int
 	// Audit receives the purge lines; nil discards them.
 	Audit *audit.Logger
-	// Log receives operational logs; nil discards them.
+	// Log receives the causes of failed purges; nil discards them.
 	Log *slog.Logger
 	// RemoveAll deletes a purged folder inside a Mount's os.Root; nil means
 	// root.RemoveAll. Tests substitute a slow one.
@@ -47,7 +47,7 @@ type Config struct {
 // Trash places content in the Trash and purges it. Safe for concurrent use.
 type Trash struct {
 	cfg   Config
-	roots map[string]*os.Root
+	roots mounts.Roots
 	// readOnly Mounts have no Trash.
 	readOnly map[string]bool
 	// mu is the process-wide write lock: every Trash placement and purge holds it.
@@ -59,27 +59,22 @@ func New(cfg Config) (*Trash, error) {
 	if cfg.RemoveAll == nil {
 		cfg.RemoveAll = func(root *os.Root, rel string) error { return root.RemoveAll(rel) }
 	}
-	t := &Trash{cfg: cfg, roots: map[string]*os.Root{}, readOnly: map[string]bool{}}
+	if cfg.Log == nil {
+		cfg.Log = slog.New(slog.DiscardHandler)
+	}
+	roots, err := mounts.OpenRoots(cfg.Mounts)
+	if err != nil {
+		return nil, err
+	}
+	t := &Trash{cfg: cfg, roots: roots, readOnly: map[string]bool{}}
 	for _, m := range cfg.Mounts {
-		root, err := os.OpenRoot(m.Path)
-		if err != nil {
-			_ = t.Close()
-			return nil, fmt.Errorf("open Mount %q: %w", m.Name, err)
-		}
-		t.roots[m.Name] = root
 		t.readOnly[m.Name] = m.ReadOnly
 	}
 	return t, nil
 }
 
 // Close releases the Mounts' os.Roots.
-func (t *Trash) Close() error {
-	var errs []error
-	for _, r := range t.roots {
-		errs = append(errs, r.Close())
-	}
-	return errors.Join(errs...)
-}
+func (t *Trash) Close() error { return t.roots.Close() }
 
 // Place moves the file, folder or symlink at rel (slash-separated, inside the Mount) into
 // the Mount's Trash and returns where it went, relative to the Mount. A symlink at rel
@@ -129,7 +124,7 @@ func (t *Trash) place(mount, rel string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("trash: %w", scrub.Path(err))
 	}
-	dir, err := folders(root, path.Join(TrashDir, t.cfg.Clock.Now().Format("2006-01-02")), path.Dir(rel))
+	dir, err := trashFolder(root, path.Join(TrashDir, t.cfg.Clock.Now().Format("2006-01-02")), path.Dir(rel))
 	if err != nil {
 		return "", fmt.Errorf("trash: %w", scrub.Path(err))
 	}
@@ -173,10 +168,10 @@ func validRel(rel string) bool {
 	return true
 }
 
-// folders makes sure base/<parent segments> exist inside the Trash and returns the
+// trashFolder makes sure base/<parent segments> exist inside the Trash and returns the
 // folder to put the item in. A segment that is taken by something that is not a folder
 // is replaced by a numbered sibling.
-func folders(root *os.Root, base, parent string) (string, error) {
+func trashFolder(root *os.Root, base, parent string) (string, error) {
 	cur := TrashDir
 	segs := strings.Split(strings.TrimPrefix(base, TrashDir+"/"), "/")
 	if parent != "." {

@@ -14,6 +14,7 @@ import (
 	"github.com/tus/tusd/v2/pkg/handler"
 
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
+	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 )
 
 // filePerm is the mode of staged files, and so of completed ones (same inode).
@@ -53,12 +54,12 @@ func stagingDir(m mounts.Mount, create bool) (string, error) {
 	dir := filepath.Join(m.Path, mounts.StagingDir)
 	if create {
 		if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
-			return "", fmt.Errorf("create staging area: %w", err)
+			return "", fmt.Errorf("create staging area: %w", scrub.Path(err))
 		}
 	}
 	fi, err := os.Lstat(dir)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("staging area: %w", scrub.Path(err))
 	}
 	if !fi.IsDir() {
 		return "", errors.New("staging area is not a folder")
@@ -124,7 +125,7 @@ func (s *store) sanitize(ctx context.Context, what string, err error) error {
 	if errors.As(err, &tusErr) {
 		return err
 	}
-	s.log.ErrorContext(ctx, what, "err", err)
+	s.log.ErrorContext(ctx, what, "err", scrub.Path(err))
 	return errInternal
 }
 

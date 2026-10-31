@@ -12,6 +12,7 @@ import (
 	"github.com/azthrun/dreambig-nas-files/internal/download"
 	"github.com/azthrun/dreambig-nas-files/internal/i18n"
 	"github.com/azthrun/dreambig-nas-files/internal/resolver"
+	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 )
 
 // zipFolder streams the folder at p (already resolved, authorized and known to be a
@@ -118,7 +119,7 @@ func (s *server) streamZip(w http.ResponseWriter, r *http.Request, user string, 
 	case err != nil: // client gone or a read failed: the archive is deliberately left unfinished
 		ev.Outcome = audit.Failed
 		if !errors.Is(err, context.Canceled) {
-			s.Log.Error("zip", "err", err)
+			s.Log.Error("zip", "err", scrub.Path(err))
 		}
 	case omitted > 0:
 		ev.Outcome = audit.Partial

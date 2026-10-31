@@ -1,9 +1,17 @@
 package trash_test
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
+
+	"github.com/azthrun/dreambig-nas-files/internal/clock"
+	"github.com/azthrun/dreambig-nas-files/internal/mounts"
+	"github.com/azthrun/dreambig-nas-files/internal/trash"
 )
 
 // A crash between setting a folder aside and removing it leaves the set-aside folder
@@ -37,5 +45,31 @@ func TestPurgeFinishesALeftoverEvenWhenRetentionIsOff(t *testing.T) {
 	}
 	if !f.exists(".nas-files-trash/2025-01-02/kept.txt") {
 		t.Error("with retention off, a dated folder was purged")
+	}
+}
+
+func TestAFailedPurgeKeepsItsCauseWithoutTheOSPath(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "docs")
+	if err := os.MkdirAll(filepath.Join(dir, ".nas-files-trash", "2020-01-01"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var log bytes.Buffer
+	tr, err := trash.New(trash.Config{
+		Mounts: []mounts.Mount{{Name: "docs", Path: dir}}, Clock: clock.NewFake(day), RetentionDays: 30,
+		Log: slog.New(slog.NewJSONHandler(&log, nil)),
+		RemoveAll: func(*os.Root, string) error {
+			return &os.PathError{Op: "unlinkat", Path: dir, Err: syscall.EIO}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tr.Close() })
+	tr.Purge()
+	if !strings.Contains(log.String(), syscall.EIO.Error()) {
+		t.Errorf("the cause is lost: %q", log.String())
+	}
+	if strings.Contains(log.String(), dir) {
+		t.Errorf("the log echoes the OS path: %q", log.String())
 	}
 }

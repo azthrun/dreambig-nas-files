@@ -156,3 +156,14 @@ func TestIsHiddenName(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenRootsErrorsDoNotEchoTheOSPath(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "gone")
+	_, err := mounts.OpenRoots([]mounts.Mount{{Name: "docs", Path: dir}})
+	if err == nil {
+		t.Fatal("opened a missing Mount")
+	}
+	if strings.Contains(err.Error(), dir) {
+		t.Errorf("error echoes the OS path: %v", err)
+	}
+}

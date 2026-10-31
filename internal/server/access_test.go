@@ -106,6 +106,29 @@ func TestReadOnlyMountCapsWriteAccessAndWriteControlsFollowAccess(t *testing.T) 
 	}
 }
 
+// Names are matched through each Mount's os.Root, so the match has to survive a symlink
+// from one Mount into another, and must not look past one that leaves the Mounts.
+func TestNFCNamesResolveBelowALinkIntoAnotherMountButNotBelowOneOutOfTheMounts(t *testing.T) {
+	e := testenv.New(t, testenv.Mount("docs"), testenv.Mount("media"))
+	nfc := norm.NFC.String("café")
+	nfd := norm.NFD.String(nfc)
+	e.WriteFile("media/shelf/"+nfd+"/a.txt", "x")
+	e.Symlink("docs/shelf", filepath.Join(e.Dir, "media", "shelf"))
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, nfd), []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e.Symlink("docs/out", outside)
+	c := e.SignIn(testenv.DefaultUser)
+
+	if rec := c.Get("/files/docs/shelf/" + url.PathEscape(nfc) + "/a.txt"); rec.Code != http.StatusOK {
+		t.Errorf("below a link into another Mount = %d, want 200", rec.Code)
+	}
+	if rec := c.Get("/files/docs/out/" + url.PathEscape(nfc)); rec.Code != http.StatusNotFound {
+		t.Errorf("below a link out of the Mounts = %d, want 404", rec.Code)
+	}
+}
+
 func TestNFCLinksResolveToEntriesStoredWithNFDNames(t *testing.T) {
 	e := testenv.New(t, testenv.Mount("docs"))
 	nfc := norm.NFC.String("café") // "café"

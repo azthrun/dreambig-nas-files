@@ -96,7 +96,7 @@ func mapMkdir(err error) error {
 	case errors.Is(err, fs.ErrNotExist):
 		return resolver.ErrNotFound
 	}
-	if strings.Contains(err.Error(), "escapes") {
+	if resolver.IsEscape(err) {
 		return resolver.ErrOutsideRoot
 	}
 	return fmt.Errorf("create parent folder: %w", scrub.Path(err))

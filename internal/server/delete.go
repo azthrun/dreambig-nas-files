@@ -106,7 +106,7 @@ func (s *server) selected(r *http.Request, user string) (*selection, string, err
 	if len(r.PostForm["names"]) == 0 {
 		return nil, auditPath, errNothingSelected
 	}
-	onDisk, err := diskNames(loc)
+	onDisk, err := loc.DiskNames()
 	if err != nil {
 		return nil, auditPath, err
 	}
@@ -138,25 +138,4 @@ func (s *server) selected(r *http.Request, user string) (*selection, string, err
 		sel.Items = append(sel.Items, selectedItem{Name: p.Name(), Path: p, loc: item})
 	}
 	return sel, folder.String(), nil
-}
-
-// diskNames maps the NFC names a User sees in the folder to the names stored on disk.
-func diskNames(loc resolver.Location) (map[string]string, error) {
-	f, err := loc.Open()
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	des, err := f.ReadDir(-1)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]string, len(des))
-	for _, de := range des {
-		nfc := norm.NFC.String(de.Name())
-		if _, dup := out[nfc]; !dup || nfc == de.Name() {
-			out[nfc] = de.Name()
-		}
-	}
-	return out, nil
 }
