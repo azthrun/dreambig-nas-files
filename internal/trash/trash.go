@@ -23,6 +23,7 @@ import (
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/clock"
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
+	"github.com/azthrun/dreambig-nas-files/internal/resolver"
 	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 )
 
@@ -83,6 +84,25 @@ func (t *Trash) Close() error {
 // Mounts again, the Mount's top level, and anything Hidden (so the Trash cannot be
 // trashed into itself).
 func (t *Trash) Place(mount, rel string) (string, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.place(mount, rel)
+}
+
+// Locked runs fn holding the process-wide write lock, so a caller can combine a
+// placement with its own tree change (an Upload that replaces a file: Trash the old one,
+// then link the new one) without another delete or placement slipping in between. place
+// is Place without taking the lock again; fn must not call Place itself.
+func (t *Trash) Locked(fn func(place func(mount, rel string) (string, error)) error) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return fn(t.place)
+}
+
+// place is Place for a caller that holds t.mu. Right before the move it re-checks the
+// parent folder of rel: the caller resolved it earlier, and a symlink may have taken its
+// place since, so every folder above rel must still be a real folder, not a link.
+func (t *Trash) place(mount, rel string) (string, error) {
 	root, ok := t.roots[mount]
 	if !ok {
 		return "", ErrNoMount
@@ -93,34 +113,9 @@ func (t *Trash) Place(mount, rel string) (string, error) {
 	if !validRel(rel) {
 		return "", ErrInvalid
 	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.placeLocked(root, mount, rel)
-}
-
-// Locked runs fn holding the process-wide write lock, so a caller can combine a
-// placement with its own tree change (an Upload that replaces a file: Trash the old one,
-// then link the new one) without another delete or placement slipping in between. place
-// is Place without taking the lock again; fn must not call Place itself.
-func (t *Trash) Locked(fn func(place func(mount, rel string) (string, error)) error) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return fn(func(mount, rel string) (string, error) {
-		root, ok := t.roots[mount]
-		if !ok {
-			return "", ErrNoMount
-		}
-		if t.readOnly[mount] {
-			return "", ErrReadOnly
-		}
-		if !validRel(rel) {
-			return "", ErrInvalid
-		}
-		return t.placeLocked(root, mount, rel)
-	})
-}
-
-func (t *Trash) placeLocked(root *os.Root, mount, rel string) (string, error) {
+	if err := recheckParent(root, rel); err != nil {
+		return "", err
+	}
 	fi, err := root.Lstat(rel)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", ErrNotFound
@@ -137,6 +132,26 @@ func (t *Trash) placeLocked(root *os.Root, mount, rel string) (string, error) {
 		return "", fmt.Errorf("trash: %w", scrub.Path(err))
 	}
 	return dest, nil
+}
+
+// recheckParent walks the folders above rel, one level at a time, and refuses the move
+// (ErrInvalid) when one is a symlink or not a folder. A folder that has vanished is
+// ErrNotFound. Paths from the resolver are already fully resolved, so a link here means
+// the tree changed after the caller looked.
+func recheckParent(root *os.Root, rel string) error {
+	segs := strings.Split(rel, "/")
+	for i := 1; i < len(segs); i++ {
+		fi, err := root.Lstat(strings.Join(segs[:i], "/"))
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return ErrNotFound
+		case err != nil:
+			return fmt.Errorf("trash: %w", scrub.Path(err))
+		case !fi.IsDir():
+			return ErrInvalid // a link, or a file where a folder was
+		}
+	}
+	return nil
 }
 
 // validRel accepts a clean, relative, slash-separated path with no Hidden segment.
@@ -208,16 +223,13 @@ func ensureDir(root *os.Root, rel string) error {
 	return nil
 }
 
-// numbered is name for n == 1, else "stem (n).ext" (folders have no extension).
+// numbered is name for n == 1, else the Numbered name "stem (n).ext": the first taken
+// name gets (2), because the original counts as the first.
 func numbered(name string, n int, isDir bool) string {
 	if n <= 1 {
 		return name
 	}
-	ext := ""
-	if !isDir {
-		ext = path.Ext(name)
-	}
-	return fmt.Sprintf("%s (%d)%s", strings.TrimSuffix(name, ext), n, ext)
+	return resolver.Numbered(name, n, isDir)
 }
 
 // moveNoReplace moves rel into dir under base (or a numbered variant) without ever

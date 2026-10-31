@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path"
-	"strings"
 	"syscall"
 
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
@@ -163,17 +162,10 @@ func (c ChoicePlacer) keepBoth(root *os.Root, staged, rel string) error {
 	return ErrConflict
 }
 
-// numbered is rel for n == 0, else "stem (n).ext" in the same folder.
+// numbered is rel for n == 0, else the Numbered name in the same folder.
 func numbered(rel string, n int) string {
-	if n == 0 {
-		return rel
-	}
 	dir, name := path.Split(rel)
-	ext := path.Ext(name)
-	if ext == name { // a dotfile has no extension
-		ext = ""
-	}
-	return fmt.Sprintf("%s%s (%d)%s", dir, strings.TrimSuffix(name, ext), n, ext)
+	return dir + resolver.Numbered(name, n, false)
 }
 
 func (c ChoicePlacer) replace(root *os.Root, p Placement, rel string) error {
