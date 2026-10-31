@@ -85,7 +85,9 @@ func statfsFree(m mounts.Mount) (int64, error) {
 }
 
 // admit refuses a new Upload of size bytes into m when the Mount's filesystem would be
-// left with less than the reserve. Only new Uploads are judged; one under way finishes.
+// left with less than the reserve once the Uploads already on their way have sent what
+// they still owe (free space only shrinks as bytes arrive). Only new Uploads are judged;
+// one under way finishes. Tusd refuses a deferred length, so every size is known.
 func (k *Keeper) admit(m mounts.Mount, size int64) error {
 	if k.cfg.Reserve <= 0 {
 		return nil
@@ -94,10 +96,46 @@ func (k *Keeper) admit(m mounts.Mount, size int64) error {
 	if err != nil {
 		return fmt.Errorf("free space: %w", err)
 	}
-	if free-k.cfg.Reserve < size {
+	owed, err := k.owed(m)
+	if err != nil {
+		return err
+	}
+	if free-k.cfg.Reserve-owed < size {
 		return errInsufficientSpace
 	}
 	return nil
+}
+
+// owed is the number of bytes the incomplete Uploads staged in m still have to send: for
+// each, its declared length minus what has arrived.
+func (k *Keeper) owed(m mounts.Mount) (int64, error) {
+	dir, err := stagingDir(m, false)
+	if err != nil {
+		return 0, nil // no Staging Area yet, so nothing is on its way
+	}
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, fmt.Errorf("list staging area: %w", scrub.Path(err))
+	}
+	var owed int64
+	for _, de := range ents {
+		id, isInfo := strings.CutSuffix(de.Name(), infoSuffix)
+		if !isInfo || !idRe.MatchString(id) || !de.Type().IsRegular() {
+			continue
+		}
+		var info struct{ Size int64 }
+		if b, err := os.ReadFile(filepath.Join(dir, de.Name())); err != nil || json.Unmarshal(b, &info) != nil {
+			continue // gone meanwhile, or damaged: it owes nothing we can count
+		}
+		var staged int64
+		if fi, err := os.Lstat(filepath.Join(dir, id)); err == nil {
+			staged = fi.Size()
+		}
+		if info.Size > staged {
+			owed += info.Size - staged
+		}
+	}
+	return owed, nil
 }
 
 // touch marks the Upload id in the Staging Area dir as active now, by the Keeper's

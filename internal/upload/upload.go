@@ -459,8 +459,8 @@ func (h *Handler) preCreate(ev handler.HookEvent) (handler.HTTPResponse, handler
 	if err != nil {
 		return handler.HTTPResponse{}, handler.FileInfoChanges{}, h.tusError(ev.Context, err)
 	}
-	// Only a new Upload is judged against the free-space reserve (a deferred length
-	// counts as 0); Uploads under way are never refused.
+	// Only a new Upload is judged against the free-space reserve; Uploads under way
+	// are never refused.
 	if err := h.Keeper.admit(loc.Mount, ev.Upload.Size); err != nil {
 		return handler.HTTPResponse{}, handler.FileInfoChanges{}, h.tusError(ev.Context, err)
 	}
