@@ -53,19 +53,22 @@ type Event struct {
 	Requested string
 	// Omitted is how many entries a Partial operation left out.
 	Omitted int
+	// Items are the Paths an operation on a selection covered; Path is their folder.
+	Items []string
 }
 
 type line struct {
-	Time      string  `json:"time"`
-	User      string  `json:"user,omitempty"`
-	Operation string  `json:"operation"`
-	Path      string  `json:"path,omitempty"`
-	Outcome   Outcome `json:"outcome"`
-	Status    int     `json:"status,omitempty"`
-	Bytes     int64   `json:"bytes,omitempty"`
-	Choice    string  `json:"choice,omitempty"`
-	Requested string  `json:"requested,omitempty"`
-	Omitted   int     `json:"omitted,omitempty"`
+	Time      string   `json:"time"`
+	User      string   `json:"user,omitempty"`
+	Operation string   `json:"operation"`
+	Path      string   `json:"path,omitempty"`
+	Outcome   Outcome  `json:"outcome"`
+	Status    int      `json:"status,omitempty"`
+	Bytes     int64    `json:"bytes,omitempty"`
+	Choice    string   `json:"choice,omitempty"`
+	Requested string   `json:"requested,omitempty"`
+	Omitted   int      `json:"omitted,omitempty"`
+	Items     []string `json:"items,omitempty"`
 }
 
 // Logger writes audit lines. Safe for concurrent use.
@@ -94,6 +97,7 @@ func (l *Logger) Record(e Event) {
 		Choice:    e.Choice,
 		Requested: e.Requested,
 		Omitted:   e.Omitted,
+		Items:     e.Items,
 	})
 	if err != nil {
 		return // cannot happen for these field types

@@ -24,7 +24,7 @@ func (s *server) zipFolder(w http.ResponseWriter, r *http.Request, user string, 
 // POST /files/<folder> with op=zip and one names=<entry> per ticked row. Read Access
 // is enough: a download is not a write. Every name goes through the Path resolver and
 // authorize like any other request; names that are hidden, missing or out of reach are
-// dropped as if they were not there.
+// dropped as if they were not there, and each drop is a refusal in the audit log.
 func (s *server) zipSelection(w http.ResponseWriter, r *http.Request, user string, p resolver.Path) {
 	loc, err := s.res.Resolve(p)
 	if err == nil {
@@ -40,7 +40,7 @@ func (s *server) zipSelection(w http.ResponseWriter, r *http.Request, user strin
 		}
 	}
 	if err != nil {
-		s.refuseBrowse(w, r, user, p, err)
+		s.refuse(w, r, "zip", user, p.String(), err, false)
 		return
 	}
 	picked := r.PostForm["names"]
@@ -52,21 +52,40 @@ func (s *server) zipSelection(w http.ResponseWriter, r *http.Request, user strin
 	seen := map[string]bool{}
 	for _, n := range picked {
 		child, err := p.Join(n)
-		if err != nil || seen[child.String()] {
+		if err == nil && seen[child.String()] {
 			continue
 		}
-		seen[child.String()] = true
-		cl, err := s.res.Resolve(child)
-		if err != nil || !cl.Exists || s.authorize(user, cl, access.Read) != nil {
+		var cl resolver.Location
+		if err == nil {
+			seen[child.String()] = true
+			if cl, err = s.res.Resolve(child); err == nil && !cl.Exists {
+				err = resolver.ErrNotFound
+			}
+		}
+		if err == nil {
+			err = s.authorize(user, cl, access.Read)
+		}
+		if err != nil {
+			s.dropFromZip(user, p, child, err)
 			continue
 		}
 		items = append(items, download.Item{Name: child.Name(), Path: child, Loc: cl})
 	}
-	if len(items) == 0 {
-		s.refuseBrowse(w, r, user, p, resolver.ErrNotFound)
+	if len(items) == 0 { // each name has its line already
+		s.refuse(w, r, "zip", user, p.String(), resolver.ErrNotFound, true)
 		return
 	}
 	s.streamZip(w, r, user, p, p.Name(), items)
+}
+
+// dropFromZip audits one selected name that is left out of the zip. A string that is not
+// a valid Path (child is then empty) is never recorded; the line names the folder.
+func (s *server) dropFromZip(user string, folder, child resolver.Path, err error) {
+	path := child.String()
+	if child.IsRoot() {
+		path = folder.String()
+	}
+	s.audit.Record(audit.Event{User: user, Operation: "zip", Path: path, Outcome: audit.Refused, Status: statusOf(err)})
 }
 
 // streamZip writes the zip while walking: headers sent at once, the work ended by the
@@ -90,6 +109,11 @@ func (s *server) streamZip(w http.ResponseWriter, r *http.Request, user string, 
 		omitted, err = download.Zip(r.Context(), cw, s.res, allow, s.Clock.Now(), i18n.T(langOf(r), "zip.incomplete"), items)
 	}
 	ev := audit.Event{User: user, Operation: "zip", Path: audited.String(), Outcome: audit.OK, Status: cw.status, Bytes: cw.bytes}
+	for _, it := range items {
+		if it.Path.String() != audited.String() { // a whole folder is just its Path
+			ev.Items = append(ev.Items, it.Path.String())
+		}
+	}
 	switch {
 	case err != nil: // client gone or a read failed: the archive is deliberately left unfinished
 		ev.Outcome = audit.Failed

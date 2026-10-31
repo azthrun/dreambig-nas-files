@@ -27,7 +27,7 @@ func (s *server) mkdir(w http.ResponseWriter, r *http.Request) {
 	target := resolver.Path{} // what the audit line names: the new folder if it can be formed
 
 	fail := func(err error) {
-		s.refuse(w, r, "mkdir", user, target.String(), err, true)
+		s.refuse(w, r, "mkdir", user, target.String(), err, false)
 	}
 	parent, err := pathFromRequest(r)
 	if err != nil {
@@ -50,16 +50,16 @@ func (s *server) mkdir(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if child, jerr := parent.JoinNew(name); jerr == nil {
+	child, nameErr := parent.JoinNew(name)
+	if nameErr == nil {
 		target = child
 	}
 	if !s.canWriteIn(user, ploc) { // the Root, read Access, or a read-only Mount
 		fail(errForbidden)
 		return
 	}
-	child, err := parent.JoinNew(name)
-	if err != nil {
-		fail(err)
+	if nameErr != nil {
+		fail(nameErr)
 		return
 	}
 	cloc, err := s.res.Resolve(child)

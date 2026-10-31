@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -39,17 +40,81 @@ func TestAMountWithoutAccessIsAuditedButAnswersLikeAMissingPath(t *testing.T) {
 func TestMkdirInAMountWithoutAccessIsAudited(t *testing.T) {
 	e := accessEnv(t)
 	bob := e.SignIn("bob")
-	missing := bob.Post("/files/docs/nope", mkdirForm("x"))
 	rec := bob.Post("/files/secret", mkdirForm("x"))
 	if rec.Code != http.StatusNotFound || rec.Body.String() != bob.Post("/files/nonexistent", mkdirForm("x")).Body.String() {
 		t.Fatalf("no-Access mkdir = %d, must look like a missing Path", rec.Code)
 	}
-	if missing.Code != http.StatusNotFound {
-		t.Fatalf("missing parent = %d", missing.Code)
+	if ls := refusalsOf(t, e, "mkdir"); len(ls) == 0 || ls[0]["path"] != "secret" || ls[0]["user"] != "bob" {
+		t.Fatalf("want a refused mkdir line for the no-Access Mount, got %v", ls)
 	}
-	ls := refusalsOf(t, e, "mkdir")
-	if len(ls) != 1 || ls[0]["path"] != "secret" || ls[0]["user"] != "bob" {
-		t.Fatalf("want one refused mkdir line for the no-Access Mount, got %v", ls)
+}
+
+// A write is never routine navigation: unlike a browse, it is audited even when all that
+// is wrong is that the parent is missing.
+func TestMkdirInAMissingFolderIsAudited(t *testing.T) {
+	e := testenv.New(t, testenv.Mount("docs"))
+	c := e.SignIn(testenv.DefaultUser)
+	if rec := c.Post("/files/docs/nope", mkdirForm("x")); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing parent = %d", rec.Code)
+	}
+	if ls := refusalsOf(t, e, "mkdir"); len(ls) != 1 || ls[0]["path"] != "docs/nope" {
+		t.Fatalf("want one refused mkdir line, got %v", ls)
+	}
+}
+
+func TestAZipAuditsWhatWasSelectedAndEveryDroppedName(t *testing.T) {
+	e := zipEnv(t)
+	e.WriteFile("docs/proj/@eaDir/x", "x")
+	e.Symlink("docs/proj/link", "../../secret/s.txt")
+	bob := e.SignIn("bob")
+	rec := bob.Post("/files/docs/proj", url.Values{"op": {"zip"}, "names": {"a.txt", "sub", "missing.txt", "@eaDir", "link", "../other.txt"}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("zip = %d", rec.Code)
+	}
+	ls := refusalsOf(t, e, "zip")
+	var got []string
+	for _, l := range ls {
+		p, _ := l["path"].(string)
+		got = append(got, p)
+		if l["user"] != "bob" {
+			t.Errorf("line without the User: %v", l)
+		}
+	}
+	want := []string{"docs/proj/missing.txt", "docs/proj/@eaDir", "docs/proj/link", "docs/proj"}
+	if !slices.Equal(got, want) {
+		t.Errorf("dropped names audited as %q, want %q", got, want)
+	}
+	var ok map[string]any
+	for _, a := range auditLines(t, e) {
+		if a["operation"] == "zip" && a["outcome"] == "ok" {
+			ok = a
+		}
+	}
+	items, _ := ok["items"].([]any)
+	if ok["path"] != "docs/proj" || len(items) != 2 || items[0] != "docs/proj/a.txt" || items[1] != "docs/proj/sub" {
+		t.Errorf("zip line does not name the selection: %v", ok)
+	}
+}
+
+func TestAZipOfNothingButBadNamesAuditsEachNameOnce(t *testing.T) {
+	e := zipEnv(t)
+	c := e.SignIn("alice")
+	if rec := c.Post("/files/docs/proj", url.Values{"op": {"zip"}, "names": {"gone.txt"}}); rec.Code != http.StatusNotFound {
+		t.Fatalf("zip = %d", rec.Code)
+	}
+	if ls := refusalsOf(t, e, "zip"); len(ls) != 1 || ls[0]["path"] != "docs/proj/gone.txt" || ls[0]["status"] != float64(404) {
+		t.Fatalf("want one refused zip line for the name, got %v", ls)
+	}
+}
+
+func TestAZipOfAMissingFolderIsAudited(t *testing.T) {
+	e := zipEnv(t)
+	c := e.SignIn("alice")
+	if rec := c.Post("/files/docs/nope", url.Values{"op": {"zip"}, "names": {"a"}}); rec.Code != http.StatusNotFound {
+		t.Fatalf("zip = %d", rec.Code)
+	}
+	if ls := refusalsOf(t, e, "zip"); len(ls) != 1 || ls[0]["path"] != "docs/nope" {
+		t.Fatalf("want one refused zip line, got %v", ls)
 	}
 }
 

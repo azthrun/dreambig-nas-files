@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -31,7 +32,7 @@ func (s *server) routes() http.Handler {
 	mux.Handle("GET /{$}", s.protected(s.root))
 	mux.Handle("POST /logout", s.protected(s.logout))
 	mux.Handle(upload.BasePath, s.protected(s.uploads)) // tus: every method, CSRF on writes
-	return s.wrap(s.withFiles(mux))
+	return s.wrap(s.withFiles(s.withRefusals(mux)))
 }
 
 // withFiles sends everything under /files straight to its handlers, bypassing the
@@ -48,6 +49,44 @@ func (s *server) withFiles(mux http.Handler) http.Handler {
 		mux.ServeHTTP(w, r)
 	})
 }
+
+// withRefusals answers requests no route takes. ServeMux would send its own English
+// "404 page not found" or "405 method not allowed"; here its handler only supplies the
+// status and the Allow header, and the page is the translated one. This is the one place
+// that sees such a request, whether signed in or not, so it audits it too. The address
+// is not recorded: it is no Path, and anyone can send anything.
+func (s *server) withRefusals(mux *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h, pattern := mux.Handler(r)
+		if pattern != "" {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		answer := &statusOnly{header: w.Header(), status: http.StatusNotFound}
+		h.ServeHTTP(answer, r)
+		key := "error.not_found"
+		if answer.status == http.StatusMethodNotAllowed {
+			key = "error.method"
+		}
+		ev := audit.Event{Operation: "route", Outcome: audit.Refused, Status: answer.status}
+		if sess := s.currentSession(w, r); sess != nil {
+			ev.User = sess.User
+			r = r.WithContext(context.WithValue(r.Context(), ctxKey{}, sess))
+		}
+		s.audit.Record(ev)
+		s.errorPage(w, r, answer.status, key)
+	})
+}
+
+// statusOnly keeps a handler's status and headers and drops its body.
+type statusOnly struct {
+	header http.Header
+	status int
+}
+
+func (a *statusOnly) Header() http.Header         { return a.header }
+func (a *statusOnly) WriteHeader(status int)      { a.status = status }
+func (a *statusOnly) Write(b []byte) (int, error) { return len(b), nil }
 
 // filesRoute dispatches /files/<Path>. The Path is parsed from the escaped URL path.
 func (s *server) filesRoute(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +112,7 @@ func (s *server) filesPost(w http.ResponseWriter, r *http.Request) {
 	case "zip":
 		p, err := pathFromRequest(r)
 		if err != nil {
-			s.refuseBrowse(w, r, sessionOf(r).User, p, err)
+			s.refuse(w, r, "zip", sessionOf(r).User, p.String(), err, false)
 			return
 		}
 		s.zipSelection(w, r, sessionOf(r).User, p)

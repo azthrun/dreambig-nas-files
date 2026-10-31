@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/azthrun/dreambig-nas-files/internal/i18n"
 	"github.com/azthrun/dreambig-nas-files/internal/testenv"
 )
 
@@ -42,6 +43,32 @@ func TestUnknownRouteIsNotFound(t *testing.T) {
 	e := testenv.New(t, testenv.Mount("docs"))
 	if rec := e.Get("/nope"); rec.Code != http.StatusNotFound {
 		t.Errorf("got %d, want 404", rec.Code)
+	}
+}
+
+func TestAnUnknownRouteAnswersInTheUsersLanguageAndIsAudited(t *testing.T) {
+	e := testenv.New(t, testenv.Mount("docs"))
+	c := e.SignIn(testenv.DefaultUser)
+	c.AcceptLanguage = "zh-Hans"
+	rec := c.Get("/nope")
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), i18n.T("zh-Hans", "error.not_found")) {
+		t.Fatalf("got %d %q", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "nope") {
+		t.Error("the page echoes the refused address")
+	}
+	anon := e.Anonymous()
+	anon.AcceptLanguage = "zh-Hans"
+	rec = anon.PostWithoutCSRF("/healthz", nil)
+	if rec.Code != http.StatusMethodNotAllowed || !strings.Contains(rec.Body.String(), i18n.T("zh-Hans", "error.method")) {
+		t.Fatalf("POST /healthz = %d %q", rec.Code, rec.Body)
+	}
+	if got := rec.Header().Get("Allow"); !strings.Contains(got, "GET") {
+		t.Errorf("Allow = %q", got)
+	}
+	ls := refusalsOf(t, e, "route")
+	if len(ls) != 2 || ls[0]["user"] != testenv.DefaultUser || ls[0]["status"] != float64(404) || ls[1]["status"] != float64(405) {
+		t.Fatalf("want a 404 line for alice and a 405 line, got %v", ls)
 	}
 }
 
