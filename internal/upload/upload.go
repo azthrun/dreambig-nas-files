@@ -27,7 +27,6 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/tus/tusd/v2/pkg/handler"
 	expslog "golang.org/x/exp/slog"
@@ -95,11 +94,6 @@ type Handler struct {
 	Config
 	store *store
 	tus   *handler.UnroutedHandler
-
-	// pending holds Uploads whose data is complete but waits for the User to settle a
-	// late Conflict (see preFinish). In memory: after a restart the User uploads again.
-	pmu     sync.Mutex
-	pending map[string]bool
 }
 
 // New builds a Handler.
@@ -113,7 +107,7 @@ func New(cfg Config) (*Handler, error) {
 	if cfg.Keeper == nil {
 		cfg.Keeper = NewKeeper(KeeperConfig{Mounts: cfg.Mounts, Audit: cfg.Audit, Log: cfg.Log})
 	}
-	h := &Handler{Config: cfg, store: newStore(cfg.Mounts, cfg.Log, cfg.Keeper), pending: map[string]bool{}}
+	h := &Handler{Config: cfg, store: newStore(cfg.Mounts, cfg.Log, cfg.Keeper)}
 
 	composer := handler.NewStoreComposer()
 	composer.UseCore(h.store)
@@ -233,37 +227,27 @@ func (h *Handler) item(w http.ResponseWriter, r *http.Request, id string, st *re
 		writeTusError(w, errMethod)
 		return
 	}
-	_, _, err := h.owned(r.Context(), id, st)
+	_, info, err := h.owned(r.Context(), id, st)
 	if err != nil {
 		writeTusError(w, err)
 		return
 	}
-	if r.Method == http.MethodHead && h.isPending(id) {
+	if r.Method == http.MethodHead && pending(info) {
 		// Its data is complete but it never landed. A client that saw "complete" would
 		// report success, so until the User settles the Conflict it does not resume.
 		writeTusError(w, errNoUpload)
 		return
 	}
-	if r.Method == http.MethodDelete {
-		h.setPending(id, false)
-	}
 	serve(w, r)
 }
 
-func (h *Handler) isPending(id string) bool {
-	h.pmu.Lock()
-	defer h.pmu.Unlock()
-	return h.pending[id]
-}
-
-func (h *Handler) setPending(id string, on bool) {
-	h.pmu.Lock()
-	defer h.pmu.Unlock()
-	if on {
-		h.pending[id] = true
-	} else {
-		delete(h.pending, id)
-	}
+// pending reports an Upload that is waiting for the User to settle a late Conflict (see
+// preFinish): all of its data is staged, yet it was not placed. A finished Upload is
+// removed from the Staging Area at once, so one that is still there and complete can only
+// be waiting. Deriving this from the staged data, rather than remembering it in memory,
+// keeps the Upload waiting across a restart.
+func pending(info handler.FileInfo) bool {
+	return !info.SizeIsDeferred && info.Offset == info.Size
 }
 
 // resolve settles a late Conflict: POST /uploads/<id>/resolve?choice=skip|keep|replace.
@@ -294,7 +278,7 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request, id string, st 
 		writeTusError(w, err)
 		return
 	}
-	if !h.isPending(id) {
+	if !pending(info) {
 		writeTusError(w, errNoUpload)
 		return
 	}
@@ -308,7 +292,6 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request, id string, st 
 			writeTusError(w, errInternal)
 			return
 		}
-		h.setPending(id, false)
 		w.Header().Set("Tus-Resumable", "1.0.0")
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -319,13 +302,9 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request, id string, st 
 	}
 	st.op = "upload"
 	if err := h.complete(ctx, st, u, info, choice); err != nil {
-		if !isConflict(err) {
-			h.setPending(id, false)
-		}
 		writeTusError(w, h.tusError(ctx, err))
 		return
 	}
-	h.setPending(id, false)
 	w.Header().Set("Tus-Resumable", "1.0.0")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -466,10 +445,12 @@ func (h *Handler) preFinish(ev handler.HookEvent) (handler.HTTPResponse, error) 
 	choice := ev.Upload.MetaData[metaConflict]
 	st.choice = choice
 	if err := h.complete(ctx, st, u, ev.Upload, choice); err != nil {
-		if isConflict(err) {
-			h.setPending(ev.Upload.ID, true)
-		} else if terr := h.store.AsTerminatableUpload(u).Terminate(ctx); terr != nil {
-			h.Log.ErrorContext(ctx, "discard staged upload", "id", ev.Upload.ID, "err", terr)
+		// On a Conflict the data simply stays: complete and still staged is what
+		// "waiting for the User" means (see pending).
+		if !isConflict(err) {
+			if terr := h.store.AsTerminatableUpload(u).Terminate(ctx); terr != nil {
+				h.Log.ErrorContext(ctx, "discard staged upload", "id", ev.Upload.ID, "err", terr)
+			}
 		}
 		return handler.HTTPResponse{}, h.tusError(ctx, err)
 	}

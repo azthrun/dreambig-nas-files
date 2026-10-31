@@ -186,8 +186,12 @@ func (k *Keeper) expireOne(m mounts.Mount, dir, id string) {
 		_ = json.Unmarshal(b, &info) // a damaged info still gets removed, just unattributed
 	}
 	var staged int64
+	landed := false // the data is also linked into place: only the staged name is left
 	if fi, err := os.Lstat(filepath.Join(dir, id)); err == nil {
 		staged = fi.Size()
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+			landed = st.Nlink > 1
+		}
 	}
 	ev := audit.Event{Operation: "upload_expire", User: info.MetaData[metaUser], Path: info.MetaData[metaPath], Bytes: staged, Outcome: audit.OK}
 	// Info first: once it is gone tusd no longer finds the Upload.
@@ -197,9 +201,11 @@ func (k *Keeper) expireOne(m mounts.Mount, dir, id string) {
 			ev.Outcome = audit.Failed
 		}
 	}
-	if ev.Outcome == audit.OK && info.Size > 0 && staged >= info.Size {
+	if ev.Outcome == audit.OK && landed {
 		return // a finished Upload's leftover staged name: housekeeping, not an expiry
 	}
+	// A complete Upload that never landed (it waited for a late Conflict to be settled)
+	// is an expiry like any other: its data is thrown away.
 	if k.cfg.Audit != nil {
 		k.cfg.Audit.Record(ev)
 	}
