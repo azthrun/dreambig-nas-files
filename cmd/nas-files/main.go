@@ -38,7 +38,7 @@ func main() {
 	cfg, cfgErr := config.Load(os.Getenv)
 	if *healthcheck {
 		// Only Addr is needed; Load sets it even when the rest of the config is bad.
-		if err := probe(cfg.Addr); err != nil {
+		if err := server.Probe(cfg.Addr); err != nil {
 			fmt.Fprintln(os.Stderr, "healthcheck:", err)
 			os.Exit(1)
 		}
@@ -61,7 +61,7 @@ func run(cfg config.Config, log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	ms, err := mounts.Discover(cfg.Root, mounts.Options{RequireMountPoints: cfg.RequireMountPoints})
+	ms, err := mounts.Discover(cfg.DataDir, mounts.Options{RequireMountPoints: cfg.RequireMountPoints})
 	if err != nil {
 		return err
 	}
@@ -130,27 +130,6 @@ func run(cfg config.Config, log *slog.Logger) error {
 	}
 	if err := <-errc; !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("serve: %w", err)
-	}
-	return nil
-}
-
-// probe GETs /healthz on addr, reaching a wildcard listen address via loopback.
-func probe(addr string) error {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return fmt.Errorf("parse NAS_FILES_ADDR %q: %w", addr, err)
-	}
-	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
-		host = "127.0.0.1"
-	}
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get("http://" + net.JoinHostPort(host, port) + "/healthz")
-	if err != nil {
-		return fmt.Errorf("GET /healthz: %w", err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("/healthz answered %d", resp.StatusCode)
 	}
 	return nil
 }

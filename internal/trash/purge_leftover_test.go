@@ -55,7 +55,7 @@ func TestAFailedPurgeKeepsItsCauseWithoutTheOSPath(t *testing.T) {
 	}
 	var log bytes.Buffer
 	tr, err := trash.New(trash.Config{
-		Mounts: []mounts.Mount{{Name: "docs", Path: dir}}, Clock: clock.NewFake(day), RetentionDays: 30,
+		Mounts: []mounts.Mount{{Name: "docs", Dir: dir}}, Clock: clock.NewFake(day), RetentionDays: 30,
 		Log: slog.New(slog.NewJSONHandler(&log, nil)),
 		RemoveAll: func(*os.Root, string) error {
 			return &os.PathError{Op: "unlinkat", Path: dir, Err: syscall.EIO}

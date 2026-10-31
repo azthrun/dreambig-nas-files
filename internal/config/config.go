@@ -44,8 +44,8 @@ type Config struct {
 	// Addr is the host:port the HTTP server listens on. Load sets it even when it
 	// returns an error, so the healthcheck probe can run without the rest.
 	Addr string
-	// Root is the OS path of the data directory whose sub-folders are the Mounts.
-	Root string
+	// DataDir is the OS path of the data directory whose sub-folders are the Mounts.
+	DataDir string
 	// RequireMountPoints makes startup refuse a Mount that is not its own mount point.
 	// Only turn it off for local runs and tests, where folders share a filesystem.
 	RequireMountPoints bool
@@ -70,7 +70,7 @@ type Config struct {
 func Load(getenv func(string) string) (Config, error) {
 	c := Config{
 		Addr:               cmp.Or(getenv(envAddr), defaultAddr),
-		Root:               cmp.Or(getenv(envRoot), defaultRoot),
+		DataDir:            cmp.Or(getenv(envRoot), defaultRoot),
 		RequireMountPoints: true,
 		UsersFile:          cmp.Or(getenv(envUsersFile), defaultUsersFile),
 		AccessFile:         cmp.Or(getenv(envAccessFile), defaultAccessFile),

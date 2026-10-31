@@ -25,8 +25,8 @@ import (
 type Mount struct {
 	// Name is the folder name; the first segment of every Path inside the Mount.
 	Name string
-	// Path is the real OS path of the Mount (symlinks resolved). Never show it to Users.
-	Path string
+	// Dir is the real OS path of the Mount (symlinks resolved). Never show it to Users.
+	Dir string
 	// ReadOnly is true when the service cannot write to the Mount. It refuses every
 	// change from every User.
 	ReadOnly bool
@@ -42,7 +42,7 @@ type Roots map[string]*os.Root
 func OpenRoots(ms []Mount) (Roots, error) {
 	roots := Roots{}
 	for _, m := range ms {
-		root, err := os.OpenRoot(m.Path)
+		root, err := os.OpenRoot(m.Dir)
 		if err != nil {
 			_ = roots.Close()
 			return nil, fmt.Errorf("open Mount %q: %w", m.Name, scrub.Path(err))
@@ -118,7 +118,7 @@ func Discover(root string, opts Options) ([]Mount, error) {
 		if err := unix.Access(real, unix.R_OK|unix.X_OK); err != nil {
 			return nil, fmt.Errorf("Mount %q: not readable by the service's user; grant it Read access in DSM", name)
 		}
-		m := Mount{Name: name, Path: real}
+		m := Mount{Name: name, Dir: real}
 		if werr := unix.Access(real, unix.W_OK); werr != nil {
 			m.ReadOnly = true
 			if !errors.Is(werr, unix.EROFS) && !mountedReadOnly(real) {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/azthrun/dreambig-nas-files/internal/i18n"
+	"github.com/azthrun/dreambig-nas-files/internal/server"
 	"github.com/azthrun/dreambig-nas-files/internal/testenv"
 )
 
@@ -69,6 +70,22 @@ func TestAnUnknownRouteAnswersInTheUsersLanguageAndIsAudited(t *testing.T) {
 	ls := refusalsOf(t, e, "route")
 	if len(ls) != 2 || ls[0]["user"] != testenv.DefaultUser || ls[0]["status"] != float64(404) || ls[1]["status"] != float64(405) {
 		t.Fatalf("want a 404 line for alice and a 405 line, got %v", ls)
+	}
+}
+
+func TestProbeAsksTheHealthCheck(t *testing.T) {
+	e := testenv.New(t, testenv.Mount("docs"))
+	srv := httptest.NewServer(e.Handler)
+	defer srv.Close()
+	if err := server.Probe(strings.TrimPrefix(srv.URL, "http://")); err != nil {
+		t.Errorf("Probe of a healthy server: %v", err)
+	}
+	if err := server.Probe("not an address"); err == nil {
+		t.Error("Probe accepted a bad address")
+	}
+	srv.Close()
+	if err := server.Probe(strings.TrimPrefix(srv.URL, "http://")); err == nil {
+		t.Error("Probe of a stopped server succeeded")
 	}
 }
 

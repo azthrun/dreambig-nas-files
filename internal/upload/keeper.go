@@ -74,7 +74,7 @@ func NewKeeper(cfg KeeperConfig) *Keeper {
 // statfsFree is the bytes an unprivileged writer may still use on m's filesystem.
 func statfsFree(m mounts.Mount) (int64, error) {
 	var st syscall.Statfs_t
-	if err := syscall.Statfs(m.Path, &st); err != nil {
+	if err := syscall.Statfs(m.Dir, &st); err != nil {
 		return 0, fmt.Errorf("statfs: %w", scrub.Path(err))
 	}
 	free := uint64(st.Bavail) * uint64(st.Bsize)

@@ -51,7 +51,7 @@ func newStore(ms []mounts.Mount, log *slog.Logger, k *Keeper) *store {
 // stagingDir returns a Mount's Staging Area, creating it when create is set. A symlink or
 // file standing in its place is refused.
 func stagingDir(m mounts.Mount, create bool) (string, error) {
-	dir := filepath.Join(m.Path, mounts.StagingDir)
+	dir := filepath.Join(m.Dir, mounts.StagingDir)
 	if create {
 		if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
 			return "", fmt.Errorf("create staging area: %w", scrub.Path(err))

@@ -19,7 +19,7 @@ func TestADeleteDoesNotWaitForARunningPurge(t *testing.T) {
 	}
 	entered, release := make(chan struct{}), make(chan struct{})
 	tr, err := trash.New(trash.Config{
-		Mounts:        []mounts.Mount{{Name: "docs", Path: dir}},
+		Mounts:        []mounts.Mount{{Name: "docs", Dir: dir}},
 		Clock:         clock.NewFake(day),
 		RetentionDays: 30,
 		// The removal of a purged folder hangs until the test lets it go.

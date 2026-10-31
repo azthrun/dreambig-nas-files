@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/upload"
@@ -142,6 +145,28 @@ func (s *server) wrap(next http.Handler) http.Handler {
 		h.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// Probe GETs /healthz on addr, reaching a wildcard listen address via loopback. It is
+// what the -healthcheck flag runs.
+func Probe(addr string) error {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("parse NAS_FILES_ADDR %q: %w", addr, err)
+	}
+	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
+		host = "127.0.0.1"
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://" + net.JoinHostPort(host, port) + "/healthz")
+	if err != nil {
+		return fmt.Errorf("GET /healthz: %w", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("/healthz answered %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // healthz answers 200 without a session and reveals nothing about the configuration.

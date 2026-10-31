@@ -33,7 +33,7 @@ func newFixture(t *testing.T, retentionDays int) *fixture {
 	}
 	clk := clock.NewFake(day)
 	tr, err := trash.New(trash.Config{
-		Mounts:        []mounts.Mount{{Name: "docs", Path: dir}},
+		Mounts:        []mounts.Mount{{Name: "docs", Dir: dir}},
 		Clock:         clk,
 		RetentionDays: retentionDays,
 	})
@@ -185,7 +185,7 @@ func purgeFixture(t *testing.T, retentionDays int) (*fixture, *bytes.Buffer) {
 	clk := clock.NewFake(day)
 	var buf bytes.Buffer
 	tr, err := trash.New(trash.Config{
-		Mounts:        []mounts.Mount{{Name: "docs", Path: dir}},
+		Mounts:        []mounts.Mount{{Name: "docs", Dir: dir}},
 		Clock:         clk,
 		RetentionDays: retentionDays,
 		Audit:         audit.New(&buf, clk),
@@ -253,7 +253,7 @@ func TestPurgeSkipsReadOnlyMounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	tr, err := trash.New(trash.Config{
-		Mounts:        []mounts.Mount{{Name: "archive", Path: dir, ReadOnly: true}},
+		Mounts:        []mounts.Mount{{Name: "archive", Dir: dir, ReadOnly: true}},
 		Clock:         clock.NewFake(day),
 		RetentionDays: 30,
 	})
@@ -293,7 +293,7 @@ func TestPlaceRefusesAReadOnlyMount(t *testing.T) {
 		t.Fatal(err)
 	}
 	tr, err := trash.New(trash.Config{
-		Mounts: []mounts.Mount{{Name: "archive", Path: dir, ReadOnly: true}},
+		Mounts: []mounts.Mount{{Name: "archive", Dir: dir, ReadOnly: true}},
 		Clock:  clock.NewFake(day),
 	})
 	if err != nil {

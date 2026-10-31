@@ -56,7 +56,7 @@ func newFixture(t *testing.T, stage bool) fixture {
 			t.Fatal(err)
 		}
 	}
-	m := []mounts.Mount{{Name: "docs", Path: dir}}
+	m := []mounts.Mount{{Name: "docs", Dir: dir}}
 	res, err := resolver.New(m)
 	if err != nil {
 		t.Fatal(err)

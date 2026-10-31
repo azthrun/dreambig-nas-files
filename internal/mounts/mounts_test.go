@@ -48,7 +48,7 @@ func TestDiscoverListsMountsSortedByName(t *testing.T) {
 	if want := "Music documents photos"; strings.Join(names, " ") != want {
 		t.Errorf("got %v, want %s", names, want)
 	}
-	if got[0].Path == "" || got[0].ReadOnly {
+	if got[0].Dir == "" || got[0].ReadOnly {
 		t.Errorf("mount record incomplete: %+v", got[0])
 	}
 }
@@ -159,7 +159,7 @@ func TestIsHiddenName(t *testing.T) {
 
 func TestOpenRootsErrorsDoNotEchoTheOSPath(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "gone")
-	_, err := mounts.OpenRoots([]mounts.Mount{{Name: "docs", Path: dir}})
+	_, err := mounts.OpenRoots([]mounts.Mount{{Name: "docs", Dir: dir}})
 	if err == nil {
 		t.Fatal("opened a missing Mount")
 	}

@@ -15,7 +15,7 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Addr != ":8080" || c.Root != "/data" || !c.RequireMountPoints || c.UsersFile != "/config/users.htpasswd" {
+	if c.Addr != ":8080" || c.DataDir != "/data" || !c.RequireMountPoints || c.UsersFile != "/config/users.htpasswd" {
 		t.Errorf("defaults wrong: %+v", c)
 	}
 }
@@ -30,7 +30,7 @@ func TestLoadOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Addr != "127.0.0.1:9000" || c.Root != "/srv" || c.RequireMountPoints || c.UsersFile != "/etc/users" {
+	if c.Addr != "127.0.0.1:9000" || c.DataDir != "/srv" || c.RequireMountPoints || c.UsersFile != "/etc/users" {
 		t.Errorf("overrides ignored: %+v", c)
 	}
 }

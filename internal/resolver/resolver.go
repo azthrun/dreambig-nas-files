@@ -180,7 +180,7 @@ func (r *Resolver) locate(mount mounts.Mount, segs []string) (Location, error) {
 	n := len(segs)
 	var real string
 	for ; ; n-- {
-		abs := filepath.Join(append([]string{mount.Path}, segs[:n]...)...)
+		abs := filepath.Join(append([]string{mount.Dir}, segs[:n]...)...)
 		got, err := filepath.EvalSymlinks(abs)
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 			if n == 0 {
@@ -226,8 +226,8 @@ func (r *Resolver) ownerOf(real string) (mounts.Mount, []string, bool) {
 	var best *mounts.Mount
 	for i := range r.mounts {
 		m := &r.mounts[i]
-		if real == m.Path || strings.HasPrefix(real, m.Path+string(filepath.Separator)) {
-			if best == nil || len(m.Path) > len(best.Path) {
+		if real == m.Dir || strings.HasPrefix(real, m.Dir+string(filepath.Separator)) {
+			if best == nil || len(m.Dir) > len(best.Dir) {
 				best = m
 			}
 		}
@@ -235,7 +235,7 @@ func (r *Resolver) ownerOf(real string) (mounts.Mount, []string, bool) {
 	if best == nil {
 		return mounts.Mount{}, nil, false
 	}
-	rest := strings.TrimPrefix(strings.TrimPrefix(real, best.Path), string(filepath.Separator))
+	rest := strings.TrimPrefix(strings.TrimPrefix(real, best.Dir), string(filepath.Separator))
 	if rest == "" {
 		return *best, nil, true
 	}
