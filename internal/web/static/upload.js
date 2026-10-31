@@ -201,25 +201,43 @@
     list.innerHTML = "";
     chosen.slice(0, KEEP_ROWS).forEach(function (c) {
       var r = newRow(c.rel, function () {
-        chosen.splice(chosen.indexOf(c), 1);
+        var at = chosen.indexOf(c);
+        chosen.splice(at, 1);
         showChosen();
+        // The rows were rebuilt, so the pressed button is gone: focus stays on the list.
+        var left = list.querySelectorAll("button");
+        (left[Math.min(at, left.length - 1)] || input).focus();
       });
       r.row.setAttribute("data-state", "waiting");
       setIcon(r.row, "clock");
       r.text.textContent = msg("waiting");
       r.detail.textContent = " · " + humanSize(c.file.size);
     });
-    status.textContent = "";
+    if (reading === 0) { status.textContent = ""; } // a drop still being read keeps its message
     total.value = 0;
     totalText.textContent = "0%";
     count.textContent = fmt(msg("files_of"), [0, chosen.length]);
     cancelBtn.hidden = false;
     activity.hidden = chosen.length === 0;
+    refreshStart();
   }
 
-  function clearPicks() {
-    input.value = "";
-    if (folderInput) { folderInput.value = ""; }
+  // Upload has nothing to do with nothing picked and nothing running.
+  function refreshStart() { startBtn.hidden = !startBtn.disabled && chosen.length === 0; }
+
+  // addChosen merges files into chosen, the one record of what is picked, and returns how
+  // many it took. A second file at the same relative path replaces the first.
+  function addChosen(files) {
+    var at = Object.create(null), taken = 0, i, rel;
+    for (i = 0; i < chosen.length; i++) { at[chosen[i].rel] = i; }
+    for (i = 0; i < files.length; i++) {
+      rel = nfc(files[i].rel);
+      if (isOSNoise(rel)) { continue; }
+      taken++;
+      if (!(rel in at)) { at[rel] = chosen.length; }
+      chosen[at[rel]] = { file: files[i].file, rel: rel, error: files[i].error };
+    }
+    return taken;
   }
 
   function failureText(err) {
@@ -377,12 +395,14 @@
     }
     cancelBtn.hidden = true;
     startBtn.disabled = false;
+    refreshStart();
     var text = fmt(msg("summary"), [ok, bad]);
     if (skippedEmpty > 0) { text += " " + fmt(msg("empty_skipped"), [skippedEmpty]); }
     status.textContent = text;
     // A reload would wipe the report of what failed, so only reload when nothing did.
     if (bad === 0 && skippedEmpty === 0) {
-      if (ok > 0) { window.location.reload(); }
+      // Not reload(): a page rendered from a refused mkdir would POST again.
+      if (ok > 0) { window.location.replace(window.location.href); }
     } else if (ok > 0) {
       status.textContent += " " + msg("reload_hint");
     }
@@ -465,8 +485,6 @@
 
   // add queues one file at its relative path ("name" or "Folder/sub/name").
   function add(file, rel, error) {
-    rel = nfc(rel);
-    if (isOSNoise(rel)) { return null; }
     var it = { file: file, rel: rel, row: null, bar: null, text: null, detail: null, cancel: null, upload: null, sent: 0, state: "waiting", settled: false };
     items.push(it);
     if (error) {
@@ -502,7 +520,6 @@
       list.innerHTML = "";
     }
     chosen = [];
-    clearPicks();
     skippedEmpty += empty || 0;
     for (var i = 0; i < picked.length; i++) { add(picked[i].file, picked[i].rel, picked[i].error); }
     if (items.length === 0) {
@@ -517,6 +534,7 @@
     refreshTotal();
     allChoice = "";
     startBtn.disabled = true;
+    refreshStart();
     cancelBtn.hidden = false;
     pump();
   }
@@ -526,17 +544,21 @@
     begin(chosen);
   });
 
+  // The inputs are emptied right away: chosen keeps the picks, and picking the same file
+  // again still fires change. A pick during a run joins it, as a drop does.
   function picksChanged() {
-    if (startBtn.disabled) { return; } // the running selection is not touched
-    var i, f;
-    chosen = [];
+    var picked = [], i, f;
     var files = input.files || [];
-    for (i = 0; i < files.length; i++) { chosen.push({ file: files[i], rel: files[i].name }); }
+    for (i = 0; i < files.length; i++) { picked.push({ file: files[i], rel: files[i].name }); }
     files = folderInput && folderInput.files ? folderInput.files : [];
     for (i = 0; i < files.length; i++) {
       f = files[i];
-      chosen.push({ file: f, rel: f.webkitRelativePath || f.name });
+      picked.push({ file: f, rel: f.webkitRelativePath || f.name });
     }
+    input.value = "";
+    if (folderInput) { folderInput.value = ""; }
+    if (addChosen(picked) === 0) { return; }
+    if (startBtn.disabled) { begin(chosen); return; }
     showChosen();
   }
   input.addEventListener("change", picksChanged);
@@ -551,7 +573,6 @@
     var i;
     if (!startBtn.disabled) { // only a pick so far: drop it
       chosen = [];
-      clearPicks();
       showChosen();
       return;
     }
@@ -645,7 +666,14 @@
       return p.then(function () { return walk(entry, "", found); });
     }, Promise.resolve()).then(function () {
       reading--;
-      begin(found.files, found.empty);
+      // A drop joins what is picked and starts it all; one with no files leaves the pick
+      // waiting for Upload.
+      if (addChosen(found.files) === 0 && chosen.length > 0) {
+        status.classList.remove("reading");
+        status.textContent = found.empty > 0 ? fmt(msg("empty_skipped"), [found.empty]) : "";
+        return;
+      }
+      begin(chosen, found.empty);
     });
   });
 })();

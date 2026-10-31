@@ -116,13 +116,22 @@ func TestExistingNameGivesAClearMessage(t *testing.T) {
 // A refused name keeps the User on the folder: the listing, and the form open on what they typed.
 func TestRefusedNameKeepsTheFormOnTheFolderPage(t *testing.T) {
 	e := testenv.New(t, testenv.Mount("docs"))
-	e.Mkdir("docs/Reports")
+	e.Mkdir("docs/Quarterly")
+	e.WriteFile("docs/note.txt", "n")
 	c := e.SignIn(testenv.DefaultUser)
-	body := c.Post("/files/docs", mkdirForm("reports")).Body.String()
-	for _, want := range []string{`<details class="popover" open>`, `value="reports"`, `aria-invalid="true"`, ">Reports<"} {
+	rec := c.Post("/files/docs", mkdirForm("quarterLY"))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("POST = %d, want 409", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{html.EscapeString(i18n.T(i18n.Default, "error.exists")), "quarterLY", "Quarterly", "note.txt"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page lacks %q", want)
 		}
+	}
+	ls := refusalsOf(t, e, "mkdir")
+	if len(ls) != 1 || ls[0]["path"] != "docs/quarterLY" || ls[0]["status"] != float64(409) || ls[0]["user"] != testenv.DefaultUser {
+		t.Errorf("want one refused mkdir line for the typed name, got %v", ls)
 	}
 }
 

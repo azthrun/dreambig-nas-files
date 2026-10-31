@@ -80,7 +80,7 @@ func (s *server) mkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cloc.TooLong {
-		fail(resolver.ErrTooLong)
+		failName(resolver.ErrTooLong)
 		return
 	}
 	if cloc.Exists || s.clashes(ploc, child.Name()) {

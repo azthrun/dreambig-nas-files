@@ -1,7 +1,7 @@
 {{template "header" .}}
 <section class="card narrow center">
 <span class="tile round">{{template "icon" "circle-help"}}</span>
-<h1 role="alert">{{.Error}}</h1>
+<div role="alert"><h1>{{.Error}}</h1></div>
 <a class="btn" href="/">{{t .Lang "error.home"}}</a>
 </section>
 {{template "footer" .}}
