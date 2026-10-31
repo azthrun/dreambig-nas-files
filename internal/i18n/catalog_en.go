@@ -8,7 +8,7 @@ var english = map[string]string{
 	"lang.en":                 "English",
 	"lang.zh-Hans":            "中文",
 	"unit.bytes":              "B",
-	"format.datetime":         "2006-01-02 15:04", // Go time layout
+	"format.datetime":         "2006-01-02 15:04 UTC", // Go time layout: file times are shown in UTC
 	"signin.title":            "Sign in",
 	"signin.name":             "Name",
 	"signin.password":         "Password",

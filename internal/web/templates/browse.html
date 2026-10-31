@@ -46,7 +46,7 @@
 <table class="files">
 <thead><tr>
 <th scope="col" class="select"><span class="sr">{{t $.Lang "browse.select"}}</span></th>
-{{range .Columns}}<th scope="col"{{if .Current}} aria-sort="ascending"{{end}}><a href="{{.Href}}">{{t $.Lang .Label}}</a>{{if .Current}} <span aria-hidden="true">{{.Arrow}}</span>{{end}}</th>
+{{range .Columns}}<th scope="col"{{if .Current}} aria-sort="{{.Sort}}"{{end}}><a href="{{.Href}}">{{t $.Lang .Label}}</a>{{if .Current}} <span aria-hidden="true">{{.Arrow}}</span>{{end}}</th>
 {{end}}</tr></thead>
 <tbody>
 {{range .Entries}}<tr class="{{if .IsDir}}dir{{else}}file{{end}}">

@@ -9,7 +9,7 @@ var chinese = map[string]string{
 	"lang.en":                 "English",
 	"lang.zh-Hans":            "中文",
 	"unit.bytes":              "字节",
-	"format.datetime":         "2006年1月2日 15:04", // Go time layout
+	"format.datetime":         "2006年1月2日 15:04 UTC", // Go time layout: file times are shown in UTC
 	"signin.title":            "登录",
 	"signin.name":             "用户名",
 	"signin.password":         "密码",

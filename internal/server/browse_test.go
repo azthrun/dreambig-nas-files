@@ -96,8 +96,19 @@ func TestEmptyFolderSaysSo(t *testing.T) {
 	if !strings.Contains(body, "This folder is empty.") {
 		t.Errorf("no empty message:\n%s", body)
 	}
-	if strings.Contains(body, "<table") {
-		t.Error("empty folder renders a table")
+	if strings.Contains(body, "Download selected as zip") {
+		t.Error("empty folder offers a selection")
+	}
+}
+
+func TestTheSortedColumnTellsAssistiveTechnologyItsDirection(t *testing.T) {
+	e := testenv.New(t, testenv.Mount("docs"))
+	e.WriteFile("docs/a.txt", "a")
+	for order, want := range map[string]string{"asc": "ascending", "desc": "descending"} {
+		body := browse(t, e, "/files/docs?sort=name&order="+order).Body.String()
+		if !strings.Contains(body, `aria-sort="`+want+`"`) {
+			t.Errorf("order=%s: no aria-sort=%q", order, want)
+		}
 	}
 }
 

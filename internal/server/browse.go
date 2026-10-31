@@ -33,6 +33,7 @@ type columnView struct {
 	Label   string
 	Href    string
 	Current bool
+	Sort    string // aria-sort of the current column
 	Arrow   string
 }
 
@@ -124,16 +125,11 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 	v.CanDelete = !v.ReadOnly
 	for _, e := range shown {
 		ev := entryView{Name: e.Name, IsDir: e.IsDir, Modified: i18n.FormatTime(lang, e.ModTime), ISO: e.ModTime.UTC().Format("2006-01-02T15:04:05Z")}
-		if e.IsDir {
-			child, err := p.Join(e.Name)
-			if err == nil {
-				ev.Href = folderHref(child)
-			}
-			ev.Size = "-"
-		} else {
-			if child, err := p.Join(e.Name); err == nil {
-				ev.Href = folderHref(child) // a file's link downloads it
-			}
+		if child, err := p.Join(e.Name); err == nil {
+			ev.Href = folderHref(child) // a file's link downloads it
+		}
+		ev.Size = "-"
+		if !e.IsDir {
 			ev.Size = i18n.FormatSize(lang, e.Size)
 		}
 		v.Entries = append(v.Entries, ev)
@@ -147,11 +143,11 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 		cv := columnView{Label: c.label}
 		if c.key == key {
 			cv.Current = true
-			cv.Arrow = "▲"
+			cv.Sort, cv.Arrow = "ascending", "▲"
 			if order == listing.Asc {
 				next = listing.Desc
 			} else {
-				cv.Arrow = "▼"
+				cv.Sort, cv.Arrow = "descending", "▼"
 			}
 		}
 		cv.Href = query(base, c.key, next, 0)

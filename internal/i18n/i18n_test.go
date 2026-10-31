@@ -97,8 +97,8 @@ func TestSizesAndDatesFollowTheLanguage(t *testing.T) {
 	cases := []struct {
 		lang, size0, size2k, date string
 	}{
-		{"en", "5 B", "2.0 KB", "2025-03-04 05:06"},
-		{"zh-Hans", "5 字节", "2.0 KB", "2025年3月4日 05:06"},
+		{"en", "5 B", "2.0 KB", "2025-03-04 05:06 UTC"},
+		{"zh-Hans", "5 字节", "2.0 KB", "2025年3月4日 05:06 UTC"},
 	}
 	for _, c := range cases {
 		if got := i18n.FormatSize(c.lang, 5); got != c.size0 {

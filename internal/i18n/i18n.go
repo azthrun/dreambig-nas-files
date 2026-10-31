@@ -131,8 +131,8 @@ func FormatSize(lang string, n int64) string {
 	return fmt.Sprintf("%.1f %s", f, suffix)
 }
 
-// FormatTime writes t (in UTC) as date and minute in lang's usual order; the layout is
-// the catalog entry "format.datetime".
+// FormatTime writes t in UTC, labelled as such, as date and minute in lang's usual order;
+// the layout is the catalog entry "format.datetime".
 func FormatTime(lang string, t time.Time) string {
 	return t.UTC().Format(T(lang, "format.datetime"))
 }
