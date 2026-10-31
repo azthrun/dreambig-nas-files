@@ -121,9 +121,20 @@ The service is plain HTTP (ADR-0002). Only the LAN and the tailnet may reach its
    2. **Source IP: Specific IP > Subnet**, IP `100.64.0.0`, mask `255.192.0.0` (this is `100.64.0.0/10`, the tailnet range). Action: **Allow**.
    3. **Source IP: All**. Action: **Deny**.
 3. Keep your existing rules for DSM itself above or below as they are; these three only cover this port. **OK**, then **Apply**.
-4. Verify from a device outside both ranges (for example a phone on mobile data without Tailscale): `http://<public-or-other-address>:<port>/` must not connect. Also check from a LAN device and from a Tailscale device that it does.
+4. Verify that the rules really filter the port. A phone on mobile data is **not** a valid test: behind your router's NAT the NAS is unreachable from the internet anyway, so it passes even with no firewall. Test with a source that can reach the NAS but is in neither allowed range:
+   1. Temporarily edit rule 1 (the LAN allow) so its subnet is a range your test device is **not** in, for example one address `<other-lan-address>` that is not your test device, and **Apply**.
+   2. From your test device on the LAN (no Tailscale), open `http://<nas-address>:<port>/`. It must **not** connect. If the page loads, the firewall is not filtering the port: go to the fallback below.
+   3. Restore rule 1 to `<lan-subnet-address>` / `<lan-subnet-mask>`, **Apply**, and check that the page loads again from the LAN and from a Tailscale device.
 
-Unverified in this repository: whether the DSM firewall filters Container Manager's published ports on your DSM version. Do step 4 to confirm; if the port is reachable from outside, add the same rules in the router instead.
+DSM's firewall may not filter the ports that Container Manager publishes (Docker adds its own forwarding rules ahead of DSM's). This repository cannot confirm it for your DSM version, so step 4 is required, not optional. If the port is reachable when it should not be, do not rely on these rules: put the same three rules (allow LAN, allow `100.64.0.0/10`, deny all) in the router or in front of the NAS, or publish the port on a single interface address (`"<nas-lan-address>:<port>:8080"` in `compose.yaml`) so it is not reachable from other networks.
+
+### Client address and the sign-in limit
+
+The sign-in rate limit counts failures per User name and per source address. Through Docker's normal port forwarding (DNAT) the real client address is kept. If a userland proxy ends the connection instead, every client shows up as the Docker gateway address, so one device's failed sign-ins would lock everybody out. The address is not written to the audit log, so check by behaviour:
+
+1. On device A (LAN), try to sign in 5 times in a row with a wrong password (any name).
+2. On device B (a different LAN device or a Tailscale device), sign in with a correct name and password.
+3. Expect: B signs in. If B is refused as well, all clients share one address: tell the owner before giving the service to more Users. The lock on A lasts 15 minutes.
 
 ## 8. Tailnet policy
 
@@ -140,7 +151,7 @@ Tailscale on the NAS is a separate step (install the package, sign in, note the 
 
 ## Configuration
 
-Set in `.env` next to `compose.yaml`. `.env.example` documents each one; a test keeps the two files and this table in step.
+Set in `.env` next to `compose.yaml`, except the five that `compose.yaml` fixes itself (`NAS_FILES_ADDR`, `NAS_FILES_ROOT`, `NAS_FILES_REQUIRE_MOUNT_POINTS`, `NAS_FILES_USERS_FILE`, `NAS_FILES_ACCESS_FILE`): changing those in `.env` has no effect unless you edit `compose.yaml`. `.env.example` documents each one; a test keeps the two files and this table in step.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
