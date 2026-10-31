@@ -149,7 +149,7 @@ type reqState struct {
 	completed bool
 	size      int64
 	denied    bool // somebody else's Upload
-	choice    string
+	choice    Choice
 	op        string // audit operation, when not the usual one for the method
 	requested string // the Path asked for, when the file landed at another one
 }
@@ -290,7 +290,7 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request, id string, st 
 		writeTusError(w, errNoUpload)
 		return
 	}
-	choice := r.URL.Query().Get("choice")
+	choice := Choice(r.URL.Query().Get("choice"))
 	st.choice = choice
 	switch choice {
 	case ChoiceSkip:
@@ -352,7 +352,7 @@ func isConflict(err error) bool {
 // record writes the audit line for a finished request: creation, completion, cancel, and
 // every refusal or failure. Progress PATCHes and routine HEADs are not audited.
 func (h *Handler) record(method string, status int, st *reqState, bytes int64) {
-	ev := audit.Event{User: st.user, Path: st.path, Status: status, Choice: st.choice, Requested: st.requested}
+	ev := audit.Event{User: st.user, Path: st.path, Status: status, Choice: string(st.choice), Requested: st.requested}
 	switch {
 	case status == http.StatusInsufficientStorage:
 		ev.Outcome = audit.Refused // the reserve said no; nothing broke
@@ -422,7 +422,7 @@ func (h *Handler) destination(user, raw string) (resolver.Path, resolver.Locatio
 // parent-folder checks. Missing parent folders are allowed (Folder Uploads create them at
 // completion) but every name to be created must pass the name rules. A non-empty choice
 // lets an existing file stand: the Placer applies it.
-func (h *Handler) check(user, raw, choice string) (resolver.Path, resolver.Location, error) {
+func (h *Handler) check(user, raw string, choice Choice) (resolver.Path, resolver.Location, error) {
 	p, loc, err := h.destination(user, raw)
 	if err != nil {
 		return p, loc, err
@@ -449,9 +449,9 @@ func (h *Handler) check(user, raw, choice string) (resolver.Path, resolver.Locat
 // choice only if it is one of the known ones.
 func (h *Handler) preCreate(ev handler.HookEvent) (handler.HTTPResponse, handler.FileInfoChanges, error) {
 	st := stateOf(ev.Context)
-	choice := ev.Upload.MetaData[metaConflict]
+	choice := Choice(ev.Upload.MetaData[metaConflict])
 	st.choice = choice
-	if choice != "" && choice != ChoiceKeep && choice != ChoiceReplace {
+	if !choice.known() {
 		return handler.HTTPResponse{}, handler.FileInfoChanges{}, errBadChoice
 	}
 	p, loc, err := h.check(st.user, ev.Upload.MetaData[metaPath], choice)
@@ -468,7 +468,7 @@ func (h *Handler) preCreate(ev handler.HookEvent) (handler.HTTPResponse, handler
 	}
 	md := handler.MetaData{metaPath: p.String(), metaUser: st.user, metaMount: loc.Mount.Name}
 	if choice != "" {
-		md[metaConflict] = choice
+		md[metaConflict] = string(choice)
 	}
 	return handler.HTTPResponse{}, handler.FileInfoChanges{MetaData: md}, nil
 }
@@ -484,7 +484,7 @@ func (h *Handler) preFinish(ev handler.HookEvent) (handler.HTTPResponse, error) 
 	if err != nil {
 		return handler.HTTPResponse{}, err
 	}
-	choice := ev.Upload.MetaData[metaConflict]
+	choice := Choice(ev.Upload.MetaData[metaConflict])
 	st.choice = choice
 	if err := h.complete(ctx, st, u, ev.Upload, choice); err != nil {
 		// On a Conflict the data simply stays: complete and still staged is what
@@ -501,7 +501,7 @@ func (h *Handler) preFinish(ev handler.HookEvent) (handler.HTTPResponse, error) 
 
 // complete re-checks a finished Upload, places it with choice and removes its staged
 // name. On error nothing has been done to the staged data.
-func (h *Handler) complete(ctx context.Context, st *reqState, u handler.Upload, info handler.FileInfo, choice string) error {
+func (h *Handler) complete(ctx context.Context, st *reqState, u handler.Upload, info handler.FileInfo, choice Choice) error {
 	p, loc, err := h.check(st.user, info.MetaData[metaPath], choice)
 	if err == nil && (info.MetaData[metaUser] != st.user || loc.Mount.Name != info.MetaData[metaMount]) {
 		err = resolver.ErrNotFound // the Path now leads into another Mount

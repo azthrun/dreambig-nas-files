@@ -32,7 +32,7 @@ type Placement struct {
 	Staged string
 	// Choice is the User's Conflict choice from the Upload's metadata: "", ChoiceKeep or
 	// ChoiceReplace.
-	Choice string
+	Choice Choice
 	// Final, when not nil, receives the location the file really got, relative to
 	// Dest.Mount (it differs from Dest.Rel() when keep both chose "name (1).ext").
 	Final *string
@@ -63,14 +63,19 @@ func (e replacedKept) Error() string {
 }
 func (e replacedKept) Is(target error) bool { return target == ErrConflict }
 
-// Conflict choices. Keep and replace are carried in Upload metadata. Skip never is: a
+// Choice is how the User settled a Conflict. Keep and replace are carried in Upload metadata. Skip never is: a
 // skipped file is not uploaded, so it is only reported (see the package doc) and accepted
 // by the resolve step.
+type Choice string
+
 const (
-	ChoiceKeep    = "keep"
-	ChoiceReplace = "replace"
-	ChoiceSkip    = "skip"
+	ChoiceKeep    Choice = "keep"
+	ChoiceReplace Choice = "replace"
+	ChoiceSkip    Choice = "skip"
 )
+
+// known reports whether c is a choice that travels in Upload metadata (or is empty).
+func (c Choice) known() bool { return c == "" || c == ChoiceKeep || c == ChoiceReplace }
 
 // Placer is the completion seam. The default, ChoicePlacer, applies the User's Conflict
 // choice; LinkPlacer refuses an existing Path. Missing parent folders are made before
