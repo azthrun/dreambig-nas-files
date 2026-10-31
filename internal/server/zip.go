@@ -1,28 +1,23 @@
 package server
 
 import (
-	"archive/zip"
 	"context"
 	"errors"
-	"io"
 	"io/fs"
 	"mime"
 	"net/http"
-	"strings"
 
 	"github.com/azthrun/dreambig-nas-files/internal/access"
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
+	"github.com/azthrun/dreambig-nas-files/internal/download"
 	"github.com/azthrun/dreambig-nas-files/internal/i18n"
 	"github.com/azthrun/dreambig-nas-files/internal/resolver"
 )
 
-// maxZipDepth bounds the walk as a second guard next to the loop check.
-const maxZipDepth = 64
-
 // zipFolder streams the folder at p (already resolved, authorized and known to be a
 // folder) as one zip: GET /files/<Path>?zip=1.
 func (s *server) zipFolder(w http.ResponseWriter, r *http.Request, user string, p resolver.Path, loc resolver.Location) {
-	s.streamZip(w, r, user, p, p.Name(), []zipItem{{name: p.Name(), path: p, loc: loc}})
+	s.streamZip(w, r, user, p, p.Name(), []download.Item{{Name: p.Name(), Path: p, Loc: loc}})
 }
 
 // zipSelection handles the browse form's "zip" action:
@@ -53,7 +48,7 @@ func (s *server) zipSelection(w http.ResponseWriter, r *http.Request, user strin
 		s.refuse(w, r, "zip", user, p.String(), errNothingSelected, false)
 		return
 	}
-	var items []zipItem
+	var items []download.Item
 	seen := map[string]bool{}
 	for _, n := range picked {
 		child, err := p.Join(n)
@@ -65,7 +60,7 @@ func (s *server) zipSelection(w http.ResponseWriter, r *http.Request, user strin
 		if err != nil || !cl.Exists || s.authorize(user, cl, access.Read) != nil {
 			continue
 		}
-		items = append(items, zipItem{name: child.Name(), path: child, loc: cl})
+		items = append(items, download.Item{Name: child.Name(), Path: child, Loc: cl})
 	}
 	if len(items) == 0 {
 		s.refuseBrowse(w, r, user, p, resolver.ErrNotFound)
@@ -74,16 +69,9 @@ func (s *server) zipSelection(w http.ResponseWriter, r *http.Request, user strin
 	s.streamZip(w, r, user, p, p.Name(), items)
 }
 
-// zipItem is one top-level thing to archive, under the name it gets in the zip.
-type zipItem struct {
-	name string
-	path resolver.Path
-	loc  resolver.Location
-}
-
-// streamZip writes the zip while walking: store-only, no temp files, headers sent at
-// once. The request context ends the work when the client goes away.
-func (s *server) streamZip(w http.ResponseWriter, r *http.Request, user string, audited resolver.Path, base string, items []zipItem) {
+// streamZip writes the zip while walking: headers sent at once, the work ended by the
+// request context when the client goes away. The walk itself is download.Zip.
+func (s *server) streamZip(w http.ResponseWriter, r *http.Request, user string, audited resolver.Path, base string, items []download.Item) {
 	h := w.Header()
 	h.Set("Content-Type", "application/zip")
 	h.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": base + ".zip"}))
@@ -95,139 +83,22 @@ func (s *server) streamZip(w http.ResponseWriter, r *http.Request, user string, 
 		f.Flush() // the download starts now, before the first file is read
 	}
 
+	var omitted int
 	var err error
-	var z *zipWalk
 	if r.Method != http.MethodHead {
-		z = &zipWalk{s: s, user: user, ctx: r.Context(), zw: zip.NewWriter(cw)}
-		for _, it := range items {
-			if err = z.add(it.path, it.loc, it.name, nil); err != nil {
-				break
-			}
-		}
-		if err == nil {
-			err = z.finish(langOf(r))
-		}
+		allow := func(loc resolver.Location) bool { return s.authorize(user, loc, access.Read) == nil }
+		omitted, err = download.Zip(r.Context(), cw, s.res, allow, s.Clock.Now(), i18n.T(langOf(r), "zip.incomplete"), items)
 	}
 	ev := audit.Event{User: user, Operation: "zip", Path: audited.String(), Outcome: audit.OK, Status: cw.status, Bytes: cw.bytes}
-	if z != nil && len(z.missed) > 0 && err == nil {
-		ev.Outcome = audit.Partial
-		ev.Omitted = len(z.missed)
-	}
-	if err != nil { // client gone or a read failed: the archive is deliberately left unfinished
+	switch {
+	case err != nil: // client gone or a read failed: the archive is deliberately left unfinished
 		ev.Outcome = audit.Failed
 		if !errors.Is(err, context.Canceled) {
 			s.Log.Error("zip", "err", err)
 		}
+	case omitted > 0:
+		ev.Outcome = audit.Partial
+		ev.Omitted = omitted
 	}
 	s.audit.Record(ev)
-}
-
-type zipWalk struct {
-	s    *server
-	user string
-	ctx  context.Context
-	zw   *zip.Writer
-	// missed holds the Paths that failed to read (vanished, unreadable). Hidden and
-	// no-Access entries are excluded silently and never land here.
-	missed []string
-}
-
-// finish adds _incomplete.txt when entries were left out, then closes the archive.
-func (z *zipWalk) finish(lang string) error {
-	if len(z.missed) > 0 {
-		hdr := &zip.FileHeader{Name: "_incomplete.txt", Method: zip.Store, Modified: z.s.Clock.Now()}
-		w, err := z.zw.CreateHeader(hdr)
-		if err != nil {
-			return err
-		}
-		note := i18n.T(lang, "zip.incomplete") + "\n" + strings.Join(z.missed, "\n") + "\n"
-		if _, err := io.WriteString(w, note); err != nil {
-			return err
-		}
-	}
-	return z.zw.Close()
-}
-
-// add archives the thing at p/loc as name, descending into folders. chain holds the real
-// folders being walked (Mount + location), so a symlink back into one of them is
-// skipped instead of followed forever.
-func (z *zipWalk) add(p resolver.Path, loc resolver.Location, name string, chain []string) error {
-	if err := z.ctx.Err(); err != nil {
-		return err
-	}
-	fi, err := loc.Stat()
-	if err != nil {
-		z.miss(p) // vanished meanwhile: leave it out, and say so
-		return nil
-	}
-	if fi.IsDir() {
-		key := loc.Mount.Name + "\x00" + loc.Rel()
-		for _, k := range chain {
-			if k == key {
-				return nil // a symlink loop
-			}
-		}
-		if len(chain) >= maxZipDepth {
-			return nil
-		}
-		hdr := &zip.FileHeader{Name: name + "/", Method: zip.Store, Modified: fi.ModTime()}
-		hdr.SetMode(fi.Mode())
-		if _, err := z.zw.CreateHeader(hdr); err != nil {
-			return err
-		}
-		entries, err := loc.ReadDir()
-		if err != nil {
-			z.miss(p)
-			return nil
-		}
-		chain = append(chain[:len(chain):len(chain)], key)
-		for _, e := range entries {
-			child, err := p.Join(e.Name)
-			if err != nil {
-				continue
-			}
-			// Each entry is judged on its own: the resolver follows its symlinks to the
-			// real target (Hidden, outside the Root), authorize checks that target's Mount.
-			cl, err := z.s.res.Resolve(child)
-			if err != nil || !cl.Exists || z.s.authorize(z.user, cl, access.Read) != nil {
-				continue
-			}
-			if err := z.add(child, cl, name+"/"+e.Name, chain); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if !fi.Mode().IsRegular() {
-		return nil
-	}
-	f, err := loc.Open()
-	if err != nil {
-		z.miss(p)
-		return nil
-	}
-	defer f.Close()
-	hdr := &zip.FileHeader{Name: name, Method: zip.Store, Modified: fi.ModTime()}
-	hdr.SetMode(fi.Mode())
-	dst, err := z.zw.CreateHeader(hdr)
-	if err != nil {
-		return err
-	}
-	_, err = io.Copy(dst, &ctxReader{ctx: z.ctx, r: f})
-	return err
-}
-
-func (z *zipWalk) miss(p resolver.Path) { z.missed = append(z.missed, p.String()) }
-
-// ctxReader stops a copy as soon as the request is cancelled.
-type ctxReader struct {
-	ctx context.Context
-	r   io.Reader
-}
-
-func (c *ctxReader) Read(b []byte) (int, error) {
-	if err := c.ctx.Err(); err != nil {
-		return 0, err
-	}
-	return c.r.Read(b)
 }
