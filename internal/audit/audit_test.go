@@ -40,7 +40,7 @@ func TestRecordEmitsOneJSONLinePerEvent(t *testing.T) {
 
 func TestRecordKeepsMultilineValuesOnOneLine(t *testing.T) {
 	var buf bytes.Buffer
-	l := audit.New(&buf, clock.NewFake(time.Now()))
+	l := audit.New(&buf, clock.NewFake(time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)))
 	l.Record(audit.Event{User: "al\nice", Operation: "signin", Outcome: audit.Refused})
 	if strings.Count(buf.String(), "\n") != 1 {
 		t.Errorf("event spans several lines: %q", buf.String())

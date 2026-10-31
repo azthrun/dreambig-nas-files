@@ -273,12 +273,11 @@ func TestRunPurgesAtStartAndStopsWhenCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { f.trash.Run(ctx, time.Hour); close(done) }()
-	deadline := time.Now().Add(5 * time.Second)
-	for f.exists(".nas-files-trash/2020-01-01") && time.Now().Before(deadline) {
+	for tries := 0; f.exists(".nas-files-trash/2020-01-01"); tries++ {
+		if tries == 1000 {
+			t.Fatal("Run did not purge at start")
+		}
 		time.Sleep(5 * time.Millisecond)
-	}
-	if f.exists(".nas-files-trash/2020-01-01") {
-		t.Error("Run did not purge at start")
 	}
 	cancel()
 	select {
