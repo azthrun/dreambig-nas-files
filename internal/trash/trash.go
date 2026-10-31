@@ -230,7 +230,9 @@ func ensureDir(root *os.Root, rel string) error {
 }
 
 // numbered is name for n == 1, else the Numbered name "stem (n).ext": the first taken
-// name gets (2), because the original counts as the first.
+// name gets (2), because the original counts as the first. (An Upload counts from 0:
+// its first try is the requested name, so the two callers differ only in this offset;
+// the naming rule itself is resolver.Numbered.)
 func numbered(name string, n int, isDir bool) string {
 	if n <= 1 {
 		return name
