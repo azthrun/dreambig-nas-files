@@ -8,9 +8,11 @@ import (
 	"io/fs"
 	"mime"
 	"net/http"
+	"strings"
 
 	"github.com/azthrun/dreambig-nas-files/internal/access"
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
+	"github.com/azthrun/dreambig-nas-files/internal/i18n"
 	"github.com/azthrun/dreambig-nas-files/internal/resolver"
 )
 
@@ -94,18 +96,23 @@ func (s *server) streamZip(w http.ResponseWriter, r *http.Request, user string, 
 	}
 
 	var err error
+	var z *zipWalk
 	if r.Method != http.MethodHead {
-		z := &zipWalk{s: s, user: user, ctx: r.Context(), zw: zip.NewWriter(cw)}
+		z = &zipWalk{s: s, user: user, ctx: r.Context(), zw: zip.NewWriter(cw)}
 		for _, it := range items {
 			if err = z.add(it.path, it.loc, it.name, nil); err != nil {
 				break
 			}
 		}
 		if err == nil {
-			err = z.zw.Close()
+			err = z.finish(langOf(r))
 		}
 	}
 	ev := audit.Event{User: user, Operation: "zip", Path: audited.String(), Outcome: audit.OK, Status: cw.status, Bytes: cw.bytes}
+	if z != nil && len(z.missed) > 0 && err == nil {
+		ev.Outcome = audit.Partial
+		ev.Omitted = len(z.missed)
+	}
 	if err != nil { // client gone or a read failed: the archive is deliberately left unfinished
 		ev.Outcome = audit.Failed
 		if !errors.Is(err, context.Canceled) {
@@ -120,6 +127,25 @@ type zipWalk struct {
 	user string
 	ctx  context.Context
 	zw   *zip.Writer
+	// missed holds the Paths that failed to read (vanished, unreadable). Hidden and
+	// no-Access entries are excluded silently and never land here.
+	missed []string
+}
+
+// finish adds _incomplete.txt when entries were left out, then closes the archive.
+func (z *zipWalk) finish(lang string) error {
+	if len(z.missed) > 0 {
+		hdr := &zip.FileHeader{Name: "_incomplete.txt", Method: zip.Store, Modified: z.s.Clock.Now()}
+		w, err := z.zw.CreateHeader(hdr)
+		if err != nil {
+			return err
+		}
+		note := i18n.T(lang, "zip.incomplete") + "\n" + strings.Join(z.missed, "\n") + "\n"
+		if _, err := io.WriteString(w, note); err != nil {
+			return err
+		}
+	}
+	return z.zw.Close()
 }
 
 // add archives the thing at p/loc as name, descending into folders. chain holds the real
@@ -131,7 +157,8 @@ func (z *zipWalk) add(p resolver.Path, loc resolver.Location, name string, chain
 	}
 	fi, err := loc.Stat()
 	if err != nil {
-		return nil // vanished meanwhile, or no longer valid: leave it out
+		z.miss(p) // vanished meanwhile: leave it out, and say so
+		return nil
 	}
 	if fi.IsDir() {
 		key := loc.Mount.Name + "\x00" + loc.Rel()
@@ -150,6 +177,7 @@ func (z *zipWalk) add(p resolver.Path, loc resolver.Location, name string, chain
 		}
 		entries, err := loc.ReadDir()
 		if err != nil {
+			z.miss(p)
 			return nil
 		}
 		chain = append(chain[:len(chain):len(chain)], key)
@@ -175,6 +203,7 @@ func (z *zipWalk) add(p resolver.Path, loc resolver.Location, name string, chain
 	}
 	f, err := loc.Open()
 	if err != nil {
+		z.miss(p)
 		return nil
 	}
 	defer f.Close()
@@ -187,6 +216,8 @@ func (z *zipWalk) add(p resolver.Path, loc resolver.Location, name string, chain
 	_, err = io.Copy(dst, &ctxReader{ctx: z.ctx, r: f})
 	return err
 }
+
+func (z *zipWalk) miss(p resolver.Path) { z.missed = append(z.missed, p.String()) }
 
 // ctxReader stops a copy as soon as the request is cancelled.
 type ctxReader struct {

@@ -26,6 +26,7 @@ var english = map[string]string{
 	"browse.empty":            "This folder is empty.",
 	"browse.zip_selected":     "Download selected as zip",
 	"browse.zip_folder":       "Download folder as zip",
+	"zip.incomplete":          "These items could not be read and are not in this archive:",
 	"browse.select":           "Select",
 	"error.no_selection":      "Select at least one item.",
 	"browse.pages":            "Pages",

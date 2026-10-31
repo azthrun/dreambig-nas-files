@@ -27,6 +27,7 @@ var chinese = map[string]string{
 	"browse.empty":            "此文件夹为空。",
 	"browse.zip_selected":     "下载所选为 zip",
 	"browse.zip_folder":       "下载文件夹为 zip",
+	"zip.incomplete":          "以下项目无法读取，未包含在此压缩包中：",
 	"browse.select":           "选择",
 	"error.no_selection":      "请至少选择一项。",
 	"browse.pages":            "分页",
