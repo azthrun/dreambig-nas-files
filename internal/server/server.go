@@ -17,6 +17,7 @@ import (
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
 	"github.com/azthrun/dreambig-nas-files/internal/resolver"
 	"github.com/azthrun/dreambig-nas-files/internal/trash"
+	"github.com/azthrun/dreambig-nas-files/internal/upload"
 	"github.com/azthrun/dreambig-nas-files/internal/web"
 )
 
@@ -48,6 +49,8 @@ type server struct {
 	tmpl     *template.Template
 	// res is the Path resolver: every request-supplied Path goes through it.
 	res *resolver.Resolver
+	// up serves resumable Uploads (tus) under /uploads/.
+	up *upload.Handler
 }
 
 // New builds the application handler.
@@ -89,5 +92,13 @@ func New(d Deps) (http.Handler, error) {
 		limiter:  newLimiter(d.Clock),
 		tmpl:     tmpl,
 	}
+	up, err := upload.New(upload.Config{
+		Mounts: d.Mounts, Resolver: res, Audit: s.audit, Log: d.Log, StatusOf: statusOf,
+		Authorize: func(user string, loc resolver.Location) error { return s.authorize(user, loc, access.Write) },
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.up = up
 	return s.routes(), nil
 }

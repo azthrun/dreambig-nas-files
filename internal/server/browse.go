@@ -54,6 +54,7 @@ type browseView struct {
 	Pages     int
 	PrevHref  string
 	NextHref  string
+	Dest      string // this folder's Path: where the upload panel sends files
 }
 
 // pathFromRequest extracts the Path from /files/<escaped Path>. Anything that is not
@@ -116,6 +117,7 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 		ReadOnly: !s.canWriteIn(user, loc),
 		Action:   folderHref(p),
 		ZipHref:  folderHref(p) + "?zip=1",
+		Dest:     p.String(),
 		MkdirURL: folderHref(p),
 		Empty:    len(entries) == 0,
 		Page:     cur,
