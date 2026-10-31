@@ -42,6 +42,8 @@ type Event struct {
 	// Status is the HTTP status sent.
 	Status int
 	Bytes  int64
+	// Choice is the Conflict choice the User made (skip, keep, replace), when there was one.
+	Choice string
 }
 
 type line struct {
@@ -52,6 +54,7 @@ type line struct {
 	Outcome   Outcome `json:"outcome"`
 	Status    int     `json:"status,omitempty"`
 	Bytes     int64   `json:"bytes,omitempty"`
+	Choice    string  `json:"choice,omitempty"`
 }
 
 // Logger writes audit lines. Safe for concurrent use.
@@ -77,6 +80,7 @@ func (l *Logger) Record(e Event) {
 		Outcome:   e.Outcome,
 		Status:    e.Status,
 		Bytes:     e.Bytes,
+		Choice:    e.Choice,
 	})
 	if err != nil {
 		return // cannot happen for these field types

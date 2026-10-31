@@ -93,7 +93,7 @@ func New(d Deps) (http.Handler, error) {
 		tmpl:     tmpl,
 	}
 	up, err := upload.New(upload.Config{
-		Mounts: d.Mounts, Resolver: res, Audit: s.audit, Log: d.Log, StatusOf: statusOf,
+		Mounts: d.Mounts, Resolver: res, Trash: d.Trash, Audit: s.audit, Log: d.Log, StatusOf: statusOf,
 		Authorize: func(user string, loc resolver.Location) error { return s.authorize(user, loc, access.Write) },
 	})
 	if err != nil {

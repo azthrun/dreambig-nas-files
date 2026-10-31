@@ -78,8 +78,10 @@ func TestLateConflictIsRefusedAndNeverOverwrites(t *testing.T) {
 	if got := e.ReadFile("docs/late.txt"); got != "someone else" {
 		t.Fatalf("file = %q", got)
 	}
-	if !stagingEmpty(e, "docs") {
-		t.Error("staged data of a refused Upload was kept")
+	// The data waits for the User to choose (see upload_conflict_test.go), but the Upload
+	// must not look resumable-and-complete to the client meanwhile.
+	if stagingEmpty(e, "docs") {
+		t.Error("staged data was discarded before the User could choose")
 	}
 	if rec := tusHead(c, loc); rec.Code != http.StatusNotFound {
 		t.Errorf("a refused Upload can still be resumed: HEAD = %d", rec.Code)
