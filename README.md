@@ -126,14 +126,14 @@ The service is plain HTTP (ADR-0002). Only the LAN and the tailnet may reach its
    2. From your test device on the LAN (no Tailscale), open `http://<nas-address>:<port>/`. It must **not** connect. If the page loads, the firewall is not filtering the port: go to the fallback below.
    3. Restore rule 1 to `<lan-subnet-address>` / `<lan-subnet-mask>`, **Apply**, and check that the page loads again from the LAN and from a Tailscale device.
 
-DSM's firewall may not filter the ports that Container Manager publishes (Docker adds its own forwarding rules ahead of DSM's). This repository cannot confirm it for your DSM version, so step 4 is required, not optional. If the port is reachable when it should not be, do not rely on these rules: put the same three rules (allow LAN, allow `100.64.0.0/10`, deny all) in the router or in front of the NAS, or publish the port on a single interface address (`"<nas-lan-address>:<port>:8080"` in `compose.yaml`) so it is not reachable from other networks.
+DSM's firewall may not filter the ports that Container Manager publishes (Docker adds its own forwarding rules ahead of DSM's). This repository cannot confirm it for your DSM version, so step 4 is required, not optional. If the port is reachable when it should not be, do not rely on these rules: put the same three rules (allow LAN, allow `100.64.0.0/10`, deny all) in the router or in front of the NAS. Publishing the port on the NAS's LAN address only (`"<nas-lan-address>:<port>:8080"` in `compose.yaml`) is not a drop-in fix: tailnet traffic arrives on the Tailscale interface, not the LAN address, so Tailscale devices could no longer connect unless something else (for example `tailscale serve` on the NAS) forwards to that address.
 
 ### Client address and the sign-in limit
 
 The sign-in rate limit counts failures per User name and per source address. Through Docker's normal port forwarding (DNAT) the real client address is kept. If a userland proxy ends the connection instead, every client shows up as the Docker gateway address, so one device's failed sign-ins would lock everybody out. The address is not written to the audit log, so check by behaviour:
 
-1. On device A (LAN), try to sign in 5 times in a row with a wrong password (any name).
-2. On device B (a different LAN device or a Tailscale device), sign in with a correct name and password.
+1. On device A (LAN), try to sign in 5 times in a row with a name that is **not** a User of this service (for example `lockout-test`) and any password. A name that exists would lock that User out for everybody, and the check would then fail for the wrong reason.
+2. On device B (a different LAN device or a Tailscale device), sign in as a real User with the correct password.
 3. Expect: B signs in. If B is refused as well, all clients share one address: tell the owner before giving the service to more Users. The lock on A lasts 15 minutes.
 
 ## 8. Tailnet policy
