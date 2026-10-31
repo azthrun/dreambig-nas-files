@@ -49,6 +49,7 @@
   function failureText(err) {
     var res = err && err.originalResponse;
     var code = res ? res.getStatus() : 0;
+    if (code === 507) { return ["failed", msg("no_space")]; } // ERR_INSUFFICIENT_SPACE: free-space reserve
     if (code === 409) { return ["exists", msg("exists")]; }
     if (code === 403 || code === 404) { return ["failed", msg("refused")]; }
     if (code === 400) { return ["failed", msg("bad_name")]; }
@@ -77,6 +78,12 @@
       endpoint: endpoint,
       retryDelays: [0, 1000, 3000, 5000, 10000],
       headers: { "X-CSRF-Token": token },
+      // A 507 (no room) is an answer, not an outage: show it at once instead of retrying.
+      onShouldRetry: function (err, retryAttempt, options) {
+        var res = err && err.originalResponse;
+        if (res && res.getStatus() === 507) { return false; }
+        return tus.defaultOptions.onShouldRetry(err, retryAttempt, options);
+      },
       metadata: { path: dest + "/" + it.file.name },
       onError: function (err) {
         if (it.state === "cancelled") { return; }

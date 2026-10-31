@@ -5,6 +5,7 @@ package testenv
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +24,7 @@ import (
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
 	"github.com/azthrun/dreambig-nas-files/internal/server"
 	"github.com/azthrun/dreambig-nas-files/internal/trash"
+	"github.com/azthrun/dreambig-nas-files/internal/upload"
 )
 
 // Env is one running application with its temp Mounts.
@@ -33,7 +35,9 @@ type Env struct {
 	Clock  *clock.Fake
 	Audit  *bytes.Buffer
 	// Trash is the Trash the app uses; PurgeTrash runs a purge with the fake clock.
-	Trash   *trash.Trash
+	Trash *trash.Trash
+	// Uploads is the Upload Keeper the app uses; ExpireUploads runs a sweep with the fake clock.
+	Uploads *upload.Keeper
 	Handler http.Handler
 	users   map[string]string // name -> password
 	t       testing.TB
@@ -61,6 +65,26 @@ type setup struct {
 	grants    map[string]map[string]string // user -> mount -> level
 	rawAcc    *string                      // AccessFile content
 	trashDays *int
+	expiry    *time.Duration
+	reserve   int64
+	freeSpace func(mount string) int64
+}
+
+// UploadExpiry sets how long an incomplete Upload may idle before the sweep removes it
+// (default 7 days; 0 never).
+func UploadExpiry(d time.Duration) Option {
+	return func(s *setup) { s.expiry = &d }
+}
+
+// FreeSpaceReserve sets the free-space reserve in bytes (default 0: no check).
+func FreeSpaceReserve(n int64) Option {
+	return func(s *setup) { s.reserve = n }
+}
+
+// FreeSpace replaces the free-space probe: fn gets a Mount's name and returns the bytes
+// free on its filesystem.
+func FreeSpace(fn func(mount string) int64) Option {
+	return func(s *setup) { s.freeSpace = fn }
 }
 
 // TrashRetention sets the Trash retention in days (default 30; 0 means never purge).
@@ -197,7 +221,19 @@ func TryNew(t testing.TB, opts ...Option) (*Env, error) {
 	}
 	t.Cleanup(func() { _ = tr.Close() })
 	e.Trash = tr
-	h, err := server.New(server.Deps{Mounts: e.Mounts, Clock: e.Clock, Audit: e.Audit, Auth: auth, Access: acc, Trash: tr})
+	expiry := 7 * 24 * time.Hour
+	if s.expiry != nil {
+		expiry = *s.expiry
+	}
+	kc := upload.KeeperConfig{
+		Mounts: e.Mounts, Clock: e.Clock, Expiry: expiry, Reserve: s.reserve,
+		Audit: audit.New(e.Audit, e.Clock),
+	}
+	if s.freeSpace != nil {
+		kc.FreeSpace = func(m mounts.Mount) (int64, error) { return s.freeSpace(m.Name), nil }
+	}
+	e.Uploads = upload.NewKeeper(kc)
+	h, err := server.New(server.Deps{Mounts: e.Mounts, Clock: e.Clock, Audit: e.Audit, Auth: auth, Access: acc, Trash: tr, Uploads: e.Uploads})
 	if err != nil {
 		return nil, err
 	}
@@ -272,3 +308,7 @@ func (e *Env) Chtimes(rel string, mtime time.Time) {
 
 // PurgeTrash runs one Trash purge now, by the fake clock, as the background loop would.
 func (e *Env) PurgeTrash() { e.Trash.Purge() }
+
+// ExpireUploads runs one Upload expiry sweep now, by the fake clock, as the background
+// loop would.
+func (e *Env) ExpireUploads() { e.Uploads.Sweep(context.Background()) }

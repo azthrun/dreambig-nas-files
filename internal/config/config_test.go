@@ -62,6 +62,43 @@ func TestTrashRetentionRejectsNonsense(t *testing.T) {
 	}
 }
 
+func TestUploadLimitsDefaultToSevenDaysAndFiveGB(t *testing.T) {
+	c, err := config.Load(env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.UploadExpiryDays != 7 || c.FreeSpaceReserveBytes != 5_000_000_000 {
+		t.Errorf("defaults = %d days, %d bytes", c.UploadExpiryDays, c.FreeSpaceReserveBytes)
+	}
+}
+
+func TestUploadLimitsAcceptOverridesAndZero(t *testing.T) {
+	c, err := config.Load(env(map[string]string{
+		"NAS_FILES_UPLOAD_EXPIRY_DAYS":    "0",
+		"NAS_FILES_FREE_SPACE_RESERVE_GB": "0.5",
+	}))
+	if err != nil || c.UploadExpiryDays != 0 || c.FreeSpaceReserveBytes != 500_000_000 {
+		t.Errorf("got %d days, %d bytes, %v", c.UploadExpiryDays, c.FreeSpaceReserveBytes, err)
+	}
+	c, err = config.Load(env(map[string]string{"NAS_FILES_FREE_SPACE_RESERVE_GB": "0"}))
+	if err != nil || c.FreeSpaceReserveBytes != 0 {
+		t.Errorf("0 GB = %d, %v", c.FreeSpaceReserveBytes, err)
+	}
+}
+
+func TestUploadLimitsRejectNonsense(t *testing.T) {
+	for k, vs := range map[string][]string{
+		"NAS_FILES_UPLOAD_EXPIRY_DAYS":    {"-1", "x", "1.5"},
+		"NAS_FILES_FREE_SPACE_RESERVE_GB": {"-1", "x", "NaN", "Inf"},
+	} {
+		for _, v := range vs {
+			if _, err := config.Load(env(map[string]string{k: v})); err == nil {
+				t.Errorf("%s=%q accepted", k, v)
+			}
+		}
+	}
+}
+
 func TestLoadRejectsBadBoolButStillReturnsAddr(t *testing.T) {
 	c, err := config.Load(env(map[string]string{
 		"NAS_FILES_ADDR":                 ":9999",

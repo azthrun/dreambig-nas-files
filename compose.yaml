@@ -19,6 +19,8 @@ services:
       NAS_FILES_USERS_FILE: /config/users.htpasswd
       NAS_FILES_ACCESS_FILE: /config/access.json
       NAS_FILES_TRASH_RETENTION_DAYS: "${NAS_FILES_TRASH_RETENTION_DAYS:-30}"
+      NAS_FILES_UPLOAD_EXPIRY_DAYS: "${NAS_FILES_UPLOAD_EXPIRY_DAYS:-7}"
+      NAS_FILES_FREE_SPACE_RESERVE_GB: "${NAS_FILES_FREE_SPACE_RESERVE_GB:-5}"
     ports:
       # The only published port (ADR-0002). Firewall it to the LAN and 100.64.0.0/10.
       - "${NAS_FILES_HOST_PORT:-8080}:8080"
