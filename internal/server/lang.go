@@ -24,7 +24,7 @@ func langOf(r *http.Request) string {
 // cookie and redirects back. It is public and a plain GET link on purpose: the switch
 // must work with JavaScript off and on the sign-in page, which has no session and no
 // CSRF token. It is not a write needing CSRF: it only stores a display preference in the
-// caller's own browser and touches no files or session. The cost of a forged request is
+// User's own browser and touches no files or session. The cost of a forged request is
 // a changed UI language, which the cookie's SameSite=Lax and the one-click switch undo.
 func (s *server) switchLanguage(w http.ResponseWriter, r *http.Request) {
 	code := r.PathValue("code")
