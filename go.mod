@@ -12,8 +12,8 @@ require (
 	// x/exp: tusd's handler.Config.Logger is an x/exp/slog Logger; used only to give it a
 	// discarding logger.
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976
-	// x/sys: unix.Access to detect read-only Mounts; the standard library's syscall has
-	// no Access on macOS, where tests run.
+	// x/sys: unix.Access to detect read-only Mounts and unix.PathMax; the standard
+	// library's syscall has neither on macOS, where tests run.
 	golang.org/x/sys v0.49.0
 	// x/text: NFC normalisation of names (unicode/norm); the standard library has none,
 	// and macOS clients send NFD names.

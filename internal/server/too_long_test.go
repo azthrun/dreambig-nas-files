@@ -2,9 +2,11 @@ package server_test
 
 import (
 	"net/http"
-	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/azthrun/dreambig-nas-files/internal/testenv"
 )
@@ -56,43 +58,100 @@ func TestAFolderUploadWithAnOverlongParentIsABadName(t *testing.T) {
 	}
 }
 
-// Every name is fine here but the whole Path is longer than the system takes: os.Root
-// could still create it, one folder at a time, and nothing could ever reach it again.
+// Every name is fine here but the whole Path is longer than the system takes, and none
+// of its folders exist yet. os.Root could still create them, one at a time, and nothing
+// could ever reach them again. The refusal comes before any data, and leaves nothing.
 func TestAPathTooLongForTheSystemIsNotCreated(t *testing.T) {
 	e := upEnv(t)
 	c := e.SignIn("alice")
-	var segs []string
+	segs := []string{}
 	for len(strings.Join(segs, "/")) < 5000 {
 		segs = append(segs, strings.Repeat("a", 200))
 	}
-	deep := "docs/" + strings.Join(segs, "/")
-
-	if rec := uploadWith(t, c, deep+"/f.txt", "", "abc"); rec.Code != http.StatusBadRequest {
-		t.Fatalf("PATCH = %d %q, want a bad name", rec.Code, rec.Body)
+	rec := tusCreate(c, "docs/"+strings.Join(segs, "/")+"/f.txt", 3)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "ERR_INVALID_PATH") {
+		t.Fatalf("create = %d %q, want a bad name before any data", rec.Code, rec.Body)
 	}
 	if !stagingEmpty(e, "docs") {
 		t.Error("staged data left behind")
 	}
-
-	// The refused Upload left the folders, so mkdir can walk down to the limit. Whatever
-	// it creates must stay reachable.
-	refused := false
-	for i := range segs {
-		parent := "/files/docs/" + strings.Join(segs[:i], "/")
-		name := strings.Repeat("b", 200)
-		switch rec := c.Post(strings.TrimSuffix(parent, "/"), mkdirForm(name)); rec.Code {
-		case http.StatusSeeOther:
-			if got := c.Get(strings.TrimSuffix(parent, "/") + "/" + url.PathEscape(name)); got.Code != http.StatusOK {
-				t.Fatalf("depth %d: the new folder answers %d", i, got.Code)
-			}
-		case http.StatusBadRequest:
-			refused = true
-		case http.StatusNotFound: // the parent is out of reach already
-		default:
-			t.Fatalf("depth %d: mkdir = %d", i, rec.Code)
-		}
+	if exists(e, "docs/"+segs[0]) {
+		t.Error("a folder was created")
 	}
-	if !refused {
-		t.Error("no mkdir reached the limit")
+	if ls := refusalsOf(t, e, "upload_create"); len(ls) != 1 {
+		t.Errorf("want the refusal audited, got %v", ls)
+	}
+}
+
+// deepFolder makes folders with mkdir until a name of room bytes, 11 to 210, ends the
+// longest absolute path the system takes. It returns the folder's Path, with room.
+func deepFolder(t *testing.T, e *testenv.Env, c *testenv.Client) (string, int) {
+	t.Helper()
+	base, err := filepath.EvalSymlinks(filepath.Join(e.Dir, "docs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := "docs"
+	used := len(base)
+	for {
+		room := unix.PathMax - 1 - used - 1 // the separator before the name
+		if room <= 210 {
+			return dir, room
+		}
+		name := strings.Repeat("a", 200)
+		if rec := c.Post("/files/"+dir, mkdirForm(name)); rec.Code != http.StatusSeeOther {
+			t.Fatalf("mkdir at %d bytes = %d", used, rec.Code)
+		}
+		dir, used = dir+"/"+name, used+201
+	}
+}
+
+// The limit is exact: what mkdir creates can always be reached, and one byte more is
+// refused with nothing created.
+func TestMkdirStopsAtTheSystemPathLimit(t *testing.T) {
+	e := upEnv(t)
+	c := e.SignIn("alice")
+	dir, room := deepFolder(t, e, c)
+
+	fits := strings.Repeat("b", room)
+	if rec := c.Post("/files/"+dir, mkdirForm(fits)); rec.Code != http.StatusSeeOther {
+		t.Fatalf("mkdir at the limit = %d", rec.Code)
+	}
+	if got := c.Get("/files/" + dir + "/" + fits); got.Code != http.StatusOK {
+		t.Errorf("the new folder answers %d", got.Code)
+	}
+	over := strings.Repeat("c", room+1)
+	if rec := c.Post("/files/"+dir, mkdirForm(over)); rec.Code != http.StatusBadRequest {
+		t.Errorf("mkdir past the limit = %d", rec.Code)
+	}
+	if exists(e, dir+"/"+over) {
+		t.Error("a folder past the limit was created")
+	}
+	if got := c.Get("/files/" + dir); !strings.Contains(got.Body.String(), fits) || strings.Contains(got.Body.String(), over) {
+		t.Error("the listing does not show just the folder that fits")
+	}
+}
+
+// The number keep both adds can carry a Path that fits over the limit.
+func TestKeepBothCannotPlaceAFilePastTheSystemPathLimit(t *testing.T) {
+	e := upEnv(t)
+	c := e.SignIn("alice")
+	dir, room := deepFolder(t, e, c)
+	path := dir + "/" + strings.Repeat("f", room)
+
+	if rec := uploadWith(t, c, path, "", "abc"); rec.Code != http.StatusNoContent {
+		t.Fatalf("upload at the limit = %d %q", rec.Code, rec.Body)
+	}
+	if got := c.Get("/files/" + path); got.Code != http.StatusOK {
+		t.Fatalf("the file answers %d", got.Code)
+	}
+	if rec := uploadWith(t, c, path, "keep", "xyz"); rec.Code != http.StatusBadRequest {
+		t.Errorf("keep both = %d %q, want a bad name", rec.Code, rec.Body)
+	}
+	if exists(e, path+" (1)") {
+		t.Error("a file past the limit was placed")
+	}
+	if !stagingEmpty(e, "docs") {
+		t.Error("staged data left behind")
 	}
 }

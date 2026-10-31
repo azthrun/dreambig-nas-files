@@ -155,6 +155,9 @@ func (c ChoicePlacer) keepBoth(root *os.Root, p Placement, rel string) error {
 	}
 	for n := 0; n < maxKeepBoth; n++ {
 		name := numbered(rel, n)
+		if !p.Dest.Fits(name) { // os.Root would manage, and nothing could reach the file
+			return resolver.ErrTooLong
+		}
 		err := linkExclusive(root, p.Staged, name)
 		if !errors.Is(err, errTaken) {
 			if err == nil {

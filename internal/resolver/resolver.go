@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
@@ -160,13 +161,9 @@ func isASCII(s string) bool {
 	return true
 }
 
-// normalisedMatch finds the entry of dir (inside root) whose NFC form is want. Only a
-// folder is opened: opening a FIFO would block for good.
+// normalisedMatch finds the entry of dir (inside root) whose NFC form is want.
 func normalisedMatch(root *os.Root, dir, want string) (string, bool) {
-	if fi, err := root.Stat(dir); err != nil || !fi.IsDir() {
-		return "", false
-	}
-	f, err := root.Open(dir)
+	f, err := OpenRead(root, dir)
 	if err != nil {
 		return "", false
 	}
@@ -208,6 +205,8 @@ func (r *Resolver) locate(mount mounts.Mount, segs []string) (Location, error) {
 		real = got
 		break
 	}
+	// EvalSymlinks stops at the first missing folder, so it never meets a limit further on.
+	tooLong = tooLong || !fits(filepath.Join(append([]string{real}, segs[n:]...)...))
 	owner, rel, ok := r.ownerOf(real)
 	if !ok {
 		return Location{}, ErrOutsideRoot
@@ -224,6 +223,16 @@ func (r *Resolver) locate(mount mounts.Mount, segs []string) (Location, error) {
 		TooLong: tooLong,
 		res:     r,
 	}, nil
+}
+
+// fits reports whether the system takes the absolute path whole; PATH_MAX counts the
+// closing NUL. locate walks a Path as one string, so what does not fit cannot be reached.
+func fits(abs string) bool { return len(abs) < unix.PathMax }
+
+// Fits reports whether rel, relative to the Mount like Rel, can be reached once created.
+// Use it for a name that did not come from Resolve.
+func (l Location) Fits(rel string) bool {
+	return fits(filepath.Join(l.Mount.Dir, filepath.FromSlash(rel)))
 }
 
 // isLoop reports a symlink loop. filepath.EvalSymlinks gives up on one with a plain
@@ -270,7 +279,8 @@ func (l Location) Stat() (fs.FileInfo, error) {
 	return fi, nil
 }
 
-// Open opens the target for reading through the Mount's os.Root.
+// Open opens the target for reading through the Mount's os.Root. Anything but a file or
+// a folder is ErrNotFound, see OpenRead.
 func (l Location) Open() (*os.File, error) {
 	if l.isRoot {
 		return nil, ErrNotFolder
@@ -279,9 +289,32 @@ func (l Location) Open() (*os.File, error) {
 		return nil, ErrNotFound
 	}
 	root, _ := l.OS()
-	f, err := root.Open(l.Rel())
+	f, err := OpenRead(root, l.Rel())
 	if err != nil {
 		return nil, mapIO(err)
+	}
+	return f, nil
+}
+
+// OpenRead is the one way to open a Mount's entry for reading: opening a FIFO blocks until
+// a writer comes, and opening a device can do anything. Anything but a regular file or a
+// folder answers fs.ErrNotExist. O_NONBLOCK and the second look cover an entry swapped in
+// after the first.
+func OpenRead(root *os.Root, rel string) (*os.File, error) {
+	fi, err := root.Stat(rel)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() && !fi.IsDir() {
+		return nil, fs.ErrNotExist
+	}
+	f, err := root.OpenFile(rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	if fi, err = f.Stat(); err != nil || (!fi.Mode().IsRegular() && !fi.IsDir()) {
+		f.Close()
+		return nil, fs.ErrNotExist
 	}
 	return f, nil
 }

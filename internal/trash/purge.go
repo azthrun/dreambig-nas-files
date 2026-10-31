@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
+	"github.com/azthrun/dreambig-nas-files/internal/resolver"
 	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 )
 
@@ -57,7 +58,7 @@ func (t *Trash) setAside() []aside {
 		if !ok || t.readOnly[m.Name] {
 			continue
 		}
-		f, err := root.Open(TrashDir)
+		f, err := resolver.OpenRead(root, TrashDir)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}

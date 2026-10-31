@@ -32,9 +32,10 @@ type Item struct {
 // (the item roots are the caller's business) and judges the REAL target after symlinks;
 // entries that are refused, Hidden or invalid are silently left out.
 //
-// Entries that fail to read (vanished, unreadable) are left out too, but listed: Zip then
-// ends with a note (IncompleteName, or a free variant of it), whose text is note followed by one Path per line. It returns
-// how many entries were left out for that reason.
+// Entries that fail to read (vanished, unreadable, neither a file nor a folder) are left
+// out too, but listed: Zip then ends with a note (IncompleteName, or a free variant of
+// it), whose text is note followed by one Path per line. It returns how many entries were
+// left out for that reason.
 func Zip(ctx context.Context, w io.Writer, res *resolver.Resolver, allow func(resolver.Location) bool, now time.Time, note string, items []Item) (omitted int, err error) {
 	z := &walk{ctx: ctx, res: res, allow: allow, zw: zip.NewWriter(w)}
 	for _, it := range items {
@@ -127,10 +128,7 @@ func (z *walk) add(p resolver.Path, loc resolver.Location, name string, chain []
 		}
 		return nil
 	}
-	if !fi.Mode().IsRegular() {
-		return nil
-	}
-	f, err := loc.Open()
+	f, err := loc.Open() // refuses a FIFO or a device, which then counts as missed
 	if err != nil {
 		z.miss(p)
 		return nil

@@ -24,8 +24,9 @@ func (s *server) zipFolder(w http.ResponseWriter, r *http.Request, user string, 
 // zipSelection handles the browse form's "zip" operation:
 // POST /files/<folder> with op=zip and one names=<entry> per ticked row. Read Access
 // is enough: a download is not a write. Every name goes through the Path resolver and
-// authorize like any other request; names that are hidden, missing or out of reach are
-// dropped as if they were not there, and each drop is a refusal in the audit log.
+// authorize like any other request; names that are hidden, missing, out of reach or
+// neither a file nor a folder are dropped as if they were not there, and each drop is a
+// refusal in the audit log.
 func (s *server) zipSelection(w http.ResponseWriter, r *http.Request, user string, p resolver.Path) {
 	loc, err := s.res.Resolve(p)
 	if err == nil {
@@ -65,6 +66,11 @@ func (s *server) zipSelection(w http.ResponseWriter, r *http.Request, user strin
 		}
 		if err == nil {
 			err = s.authorize(user, cl, access.Read)
+		}
+		if err == nil {
+			if fi, serr := cl.Stat(); serr == nil && !fi.IsDir() && !fi.Mode().IsRegular() {
+				err = errNotFile
+			}
 		}
 		if err != nil {
 			s.dropFromZip(user, p, child, err)
