@@ -72,6 +72,7 @@ var english = map[string]string{
 	"upload.start":            "Upload",
 	"upload.cancel":           "Cancel",
 	"upload.cancel_all":       "Cancel all",
+	"upload.cancel_item":      "Cancel %s",
 	"upload.overall":          "Overall progress",
 	"upload.files_of":         "%d of %d files",
 	"upload.waiting":          "Waiting",

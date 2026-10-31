@@ -19,7 +19,10 @@
       if (pop.open && !pop.contains(ev.target)) { pop.open = false; }
     });
     document.addEventListener("keydown", function (ev) {
-      if (ev.key === "Escape") { pop.open = false; }
+      if (ev.key !== "Escape" || !pop.open) { return; }
+      var inside = pop.contains(document.activeElement);
+      pop.open = false;
+      if (inside) { pop.querySelector("summary").focus(); }
     });
   }
 })();

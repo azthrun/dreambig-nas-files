@@ -73,6 +73,7 @@ var chinese = map[string]string{
 	"upload.start":            "上传",
 	"upload.cancel":           "取消",
 	"upload.cancel_all":       "全部取消",
+	"upload.cancel_item":      "取消 %s",
 	"upload.overall":          "总进度",
 	"upload.files_of":         "已完成 %d / %d 个文件",
 	"upload.waiting":          "等待中",

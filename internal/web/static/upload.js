@@ -50,7 +50,8 @@
   var active = 0;   // Uploads in flight
   var reading = 0;  // dropped folders still being read
   var skippedEmpty = 0;
-  // The User's "apply to all" Conflict choice for the rest of this selection: "", "skip",
+  var cancelGen = 0;   // bumped by Cancel all: a drop read under an older one is dropped
+  // The User's "apply to all" Conflict choice for the rest of this run: "", "skip",
   // "keep" or "replace".
   var allChoice = "";
   var askQueue = [];   // items waiting for the one Conflict dialog
@@ -115,10 +116,12 @@
     bar.max = 100;
     bar.value = 0;
     bar.hidden = true;
+    bar.setAttribute("aria-label", rel);
     var cancel = document.createElement("button");
     cancel.type = "button";
     cancel.className = "link-btn";
     cancel.textContent = msg("cancel");
+    cancel.setAttribute("aria-label", msg("cancel_item").split("%s").join(rel));
     cancel.addEventListener("click", onCancel);
     line.appendChild(text);
     line.appendChild(detail);
@@ -136,8 +139,26 @@
   // only the ones that run or fail get a line on the page.
   function ensureRow(it) {
     if (it.row) { return; }
-    var r = newRow(it.rel, function () { cancelItem(it); });
+    var r = newRow(it.rel, function () {
+      var held = document.activeElement === it.cancel;
+      var row = it.row;
+      cancelItem(it);
+      if (held) { moveFocus(row); }
+    });
     it.row = r.row; it.bar = r.bar; it.text = r.text; it.detail = r.detail; it.cancel = r.cancel;
+  }
+
+  // moveFocus is for when the control holding focus went away, which would drop focus to
+  // the page: on to the next visible row Cancel after row (else the nearest before it),
+  // or to the file picker. Callers check first that the control did hold focus.
+  function moveFocus(row) {
+    var btns = list.querySelectorAll("button"), to = null;
+    for (var i = 0; i < btns.length; i++) {
+      if (btns[i].hidden || (row && row.contains(btns[i]))) { continue; }
+      to = btns[i];
+      if (!row || row.compareDocumentPosition(to) & Node.DOCUMENT_POSITION_FOLLOWING) { break; }
+    }
+    (to || input).focus();
   }
 
   // The icon says why a row stopped: colour alone must not carry it.
@@ -393,7 +414,9 @@
     for (var i = 0; i < items.length; i++) {
       if (items[i].state === "done") { ok++; } else if (items[i].state === "failed" || items[i].state === "exists") { bad++; }
     }
+    var held = document.activeElement === cancelBtn;
     cancelBtn.hidden = true;
+    if (held) { moveFocus(); }
     startBtn.disabled = false;
     refreshStart();
     var text = fmt(msg("summary"), [ok, bad]);
@@ -517,6 +540,7 @@
       items = [];
       cursor = 0;
       skippedEmpty = 0;
+      allChoice = "";
       list.innerHTML = "";
     }
     chosen = [];
@@ -532,7 +556,6 @@
     status.textContent = "";
     activity.hidden = false;
     refreshTotal();
-    allChoice = "";
     startBtn.disabled = true;
     refreshStart();
     cancelBtn.hidden = false;
@@ -564,16 +587,27 @@
   input.addEventListener("change", picksChanged);
   if (folderInput) { folderInput.addEventListener("change", picksChanged); }
 
-  function pick(choice) { return function () { if (asking && asking.onChoice) { asking.onChoice(choice); } }; }
+  function pick(choice) {
+    return function (ev) {
+      if (!asking || !asking.onChoice) { return; }
+      var held = document.activeElement === ev.currentTarget;
+      var row = asking.row;
+      asking.onChoice(choice);
+      if (held && ask.hidden) { moveFocus(row); } // that was the last question
+    };
+  }
   document.getElementById("upload-conflict-skip").addEventListener("click", pick("skip"));
   document.getElementById("upload-conflict-keep").addEventListener("click", pick("keep"));
   document.getElementById("upload-conflict-replace").addEventListener("click", pick("replace"));
 
   cancelBtn.addEventListener("click", function () {
     var i;
+    cancelGen++;
     if (!startBtn.disabled) { // only a pick so far: drop it
+      var held = document.activeElement === cancelBtn;
       chosen = [];
       showChosen();
+      if (held) { moveFocus(); }
       return;
     }
     for (i = 0; i < items.length; i++) { // waiting ones first, so none starts meanwhile
@@ -658,6 +692,7 @@
     var found = { files: [], empty: 0 };
     for (i = 0; i < plain.length; i++) { found.files.push({ file: plain[i], rel: plain[i].name }); }
     reading++;
+    var gen = cancelGen;
     if (startBtn.disabled === false) {
       status.textContent = msg("reading");
       status.classList.add("reading");
@@ -666,6 +701,14 @@
       return p.then(function () { return walk(entry, "", found); });
     }, Promise.resolve()).then(function () {
       reading--;
+      if (gen !== cancelGen) { // Cancel all came first: nothing of this drop is kept
+        if (startBtn.disabled) { pump(); return; } // the run may have been waiting for it
+        if (reading === 0 && status.classList.contains("reading")) {
+          status.classList.remove("reading");
+          status.textContent = "";
+        }
+        return;
+      }
       // A drop joins what is picked and starts it all; one with no files leaves the pick
       // waiting for Upload.
       if (addChosen(found.files) === 0 && chosen.length > 0) {
