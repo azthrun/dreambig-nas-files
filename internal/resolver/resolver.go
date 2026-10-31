@@ -182,8 +182,8 @@ func (r *Resolver) locate(mount mounts.Mount, segs []string) (Location, error) {
 			}
 			continue // missing, or a file stands where a folder should
 		}
-		if errors.Is(err, syscall.ELOOP) {
-			return Location{}, ErrNotFound
+		if err != nil && isLoop(err) {
+			return Location{}, ErrNotFound // a symlink loop leads nowhere
 		}
 		if err != nil {
 			return Location{}, fmt.Errorf("resolve path: %w", scrub(err))
@@ -206,6 +206,12 @@ func (r *Resolver) locate(mount mounts.Mount, segs []string) (Location, error) {
 		Exists: n == len(segs),
 		res:    r,
 	}, nil
+}
+
+// isLoop reports a symlink loop. filepath.EvalSymlinks gives up on one with a plain
+// error ("too many links") that carries no errno, so the text is all there is to match.
+func isLoop(err error) bool {
+	return errors.Is(err, syscall.ELOOP) || strings.Contains(err.Error(), "too many links")
 }
 
 // ownerOf finds the Mount whose folder contains the real absolute path (the deepest one
