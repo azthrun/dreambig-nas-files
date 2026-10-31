@@ -58,8 +58,14 @@ func (s *server) mkdir(w http.ResponseWriter, r *http.Request) {
 		fail(errForbidden)
 		return
 	}
+	// A refused name is the User's to fix: answer on the folder page, the form still open.
+	failName := func(err error) {
+		s.refuseWith(w, r, "mkdir", user, target.String(), err, false, func(w http.ResponseWriter, r *http.Request, status int, key string) {
+			s.mkdirForm(w, r, user, parent, ploc, name, status, key)
+		})
+	}
 	if nameErr != nil {
-		fail(nameErr)
+		failName(nameErr)
 		return
 	}
 	cloc, err := s.res.Resolve(child)
@@ -78,7 +84,7 @@ func (s *server) mkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cloc.Exists || s.clashes(ploc, child.Name()) {
-		fail(errExists)
+		failName(errExists)
 		return
 	}
 	root, err := cloc.OS()
@@ -86,7 +92,8 @@ func (s *server) mkdir(w http.ResponseWriter, r *http.Request) {
 		err = root.Mkdir(cloc.Rel(), mkdirMode)
 	}
 	if errors.Is(err, os.ErrExist) {
-		err = errExists
+		failName(errExists)
+		return
 	}
 	if err != nil {
 		fail(err)
@@ -94,6 +101,19 @@ func (s *server) mkdir(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Audit.Record(audit.Event{User: user, Operation: "mkdir", Path: child.String(), Outcome: audit.OK, Status: http.StatusSeeOther})
 	http.Redirect(w, r, folderHref(parent), http.StatusSeeOther)
+}
+
+// mkdirForm answers a refused name with the folder page and the form open on the error.
+// A folder that can no longer be listed gets the plain error page.
+func (s *server) mkdirForm(w http.ResponseWriter, r *http.Request, user string, p resolver.Path, loc resolver.Location, name string, status int, key string) {
+	entries, err := loc.ReadDir()
+	if err != nil {
+		s.errorPage(w, r, status, key)
+		return
+	}
+	v := s.folderView(r, user, p, loc, entries)
+	v.MkdirError, v.MkdirName = key, name
+	s.render(w, r, status, "browse.html", page{Title: p.Name(), Browse: v})
 }
 
 // clashes reports whether the folder already holds a name that a case-insensitive

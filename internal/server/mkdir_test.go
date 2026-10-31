@@ -113,6 +113,19 @@ func TestExistingNameGivesAClearMessage(t *testing.T) {
 	}
 }
 
+// A refused name keeps the User on the folder: the listing, and the form open on what they typed.
+func TestRefusedNameKeepsTheFormOnTheFolderPage(t *testing.T) {
+	e := testenv.New(t, testenv.Mount("docs"))
+	e.Mkdir("docs/Reports")
+	c := e.SignIn(testenv.DefaultUser)
+	body := c.Post("/files/docs", mkdirForm("reports")).Body.String()
+	for _, want := range []string{`<details class="popover" open>`, `value="reports"`, `aria-invalid="true"`, ">Reports<"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("page lacks %q", want)
+		}
+	}
+}
+
 func TestCreateFolderNeedsWriteAccessOnAWritableMount(t *testing.T) {
 	e := accessEnv(t) // alice writes docs; archive is a read-only Mount; bob reads docs; carol nothing
 	e.Symlink("docs/tolink", "../secret")

@@ -35,8 +35,13 @@ type selection struct {
 	Items  []selectedItem
 }
 
+type confirmItem struct {
+	Name  string
+	IsDir bool
+}
+
 type confirmView struct {
-	Names []string
+	Items []confirmItem
 	Back  string // where Cancel goes
 }
 
@@ -50,7 +55,8 @@ func (s *server) confirmDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	v := &confirmView{Back: folderHref(sel.Folder)}
 	for _, it := range sel.Items {
-		v.Names = append(v.Names, it.Name)
+		fi, err := it.loc.Stat()
+		v.Items = append(v.Items, confirmItem{Name: it.Name, IsDir: err == nil && fi.IsDir()})
 	}
 	s.render(w, r, http.StatusOK, "delete.html", page{Title: sel.Folder.Name(), Confirm: v, Next: v.Back})
 }

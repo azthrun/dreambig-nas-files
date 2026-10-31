@@ -1,8 +1,56 @@
 {{template "header" .}}
 {{with .Browse}}<nav class="crumbs" aria-label="{{t $.Lang "browse.location"}}"><ol>
-{{range $i, $c := .Crumbs}}<li>{{if eq (len (slice $.Browse.Crumbs $i)) 1}}<span aria-current="page">{{$c.Name}}</span>{{else}}<a href="{{$c.Href}}">{{$c.Name}}</a>{{end}}</li>
-{{end}}</ol>{{if .ReadOnly}} <span class="tag">{{t $.Lang "root.read_only"}}</span>{{end}}</nav>
-{{if not .ReadOnly}}<section id="upload" class="upload" hidden data-endpoint="/uploads/" data-dest="{{.Dest}}"
+{{range $i, $c := .Crumbs}}<li>{{if eq (len (slice $.Browse.Crumbs $i)) 1}}<span aria-current="page">{{$c.Name}}</span>{{else}}<a href="{{$c.Href}}">{{$c.Name}}</a>{{template "icon" "chevron-right"}}{{end}}</li>
+{{end}}</ol></nav>
+<div class="head">
+<div class="head-title"><h1>{{$.Title}}</h1>{{if .ReadOnly}}<span class="tag">{{template "icon" "lock"}}{{t $.Lang "root.read_only"}}</span>{{end}}</div>
+<div class="head-actions">
+{{if not .ReadOnly}}<details class="popover"{{if .MkdirError}} open{{end}}>
+<summary class="btn">{{template "icon" "folder-plus"}}{{t $.Lang "browse.create_folder"}}</summary>
+<form class="mkdir stack" method="post" action="{{.MkdirURL}}">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<input type="hidden" name="op" value="mkdir">
+<label>{{t $.Lang "browse.folder_name"}} <input type="text" name="name" value="{{.MkdirName}}" required maxlength="255" autocomplete="off"{{if .MkdirError}} aria-invalid="true" aria-describedby="mkdir-error" autofocus{{end}}></label>
+{{if .MkdirError}}<p class="field-error" id="mkdir-error" role="alert">{{template "icon" "circle-alert"}}<span>{{t $.Lang .MkdirError}}</span></p>
+{{end}}<button type="submit" class="btn primary wide">{{t $.Lang "browse.create_folder"}}</button>
+</form>
+</details>
+{{end}}<a class="btn" href="{{.ZipHref}}">{{template "icon" "folder-down"}}{{t $.Lang "browse.zip_folder"}}</a>
+</div>
+</div>
+<div class="workspace">
+{{if .Empty}}<section class="card empty"><span class="tile round">{{template "icon" "folder"}}</span><p>{{t $.Lang "browse.empty"}}</p></section>
+{{else}}{{/* One selection form for every row action; each action is a submit button named
+     "op" (zip here; delete from #10). Plain HTML, works with JS off, and read-only
+     Users get it too (a download is not a write). */}}
+<form method="post" action="{{.Action}}" class="selection card">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<div class="toolbar">
+<button type="submit" class="btn" name="op" value="zip">{{template "icon" "download"}}{{t $.Lang "browse.zip_selected"}}</button>
+{{if .CanDelete}}<button type="submit" class="btn danger" name="op" value="delete">{{template "icon" "trash-2"}}{{t $.Lang "browse.delete_selected"}}</button>
+{{end}}<span id="selected-count" class="muted" role="status" data-msg="{{t $.Lang "browse.selected"}}"></span>
+</div>
+<table class="files">
+<thead><tr>
+<th scope="col" class="select"><span class="sr">{{t $.Lang "browse.select"}}</span><span class="sort-label">{{t $.Lang "browse.sort_by"}}</span></th>
+{{range .Columns}}<th scope="col"{{if .Current}} aria-sort="{{.Sort}}"{{end}}><a href="{{.Href}}">{{t $.Lang .Label}}{{if eq .Sort "ascending"}}{{template "icon" "arrow-up"}}{{else if eq .Sort "descending"}}{{template "icon" "arrow-down"}}{{else}}{{template "icon" "chevrons-up-down"}}{{end}}</a></th>
+{{end}}</tr></thead>
+<tbody>
+{{range .Entries}}<tr class="{{if .IsDir}}dir{{else}}file{{end}}">
+<td class="select"><input type="checkbox" name="names" value="{{.Name}}" aria-label="{{t $.Lang "browse.select_item" .Name}}"></td>
+<td class="name"><span class="tile{{if .IsDir}} folder{{end}}">{{template "icon" .Icon}}</span>{{if .Href}}<a href="{{.Href}}">{{.Name}}</a>{{else}}<span>{{.Name}}</span>{{end}}</td>
+<td class="size">{{.Size}}</td>
+<td class="modified"><time datetime="{{.ISO}}">{{.Modified}}</time></td>
+</tr>
+{{end}}</tbody>
+</table>
+{{if gt .Pages 1}}<nav class="pager" aria-label="{{t $.Lang "browse.pages"}}">
+{{if .PrevHref}}<a class="btn" href="{{.PrevHref}}" rel="prev">{{template "icon" "chevron-left"}}{{t $.Lang "browse.prev"}}</a>{{else}}<span></span>{{end}}
+<span class="muted">{{t $.Lang "browse.page_of" .Page .Pages}}</span>
+{{if .NextHref}}<a class="btn" href="{{.NextHref}}" rel="next">{{t $.Lang "browse.next"}}{{template "icon" "chevron-right"}}</a>{{else}}<span></span>{{end}}
+</nav>
+{{end}}</form>
+{{end}}{{if not .ReadOnly}}<section id="upload" class="upload card" hidden data-endpoint="/uploads/" data-dest="{{.Dest}}"
  data-msg-cancel="{{t $.Lang "upload.cancel"}}" data-msg-waiting="{{t $.Lang "upload.waiting"}}" data-msg-uploading="{{t $.Lang "upload.uploading"}}"
  data-msg-done="{{t $.Lang "upload.done"}}" data-msg-cancelled="{{t $.Lang "upload.cancelled"}}" data-msg-exists="{{t $.Lang "upload.exists"}}"
  data-msg-refused="{{t $.Lang "upload.refused"}}" data-msg-bad_name="{{t $.Lang "upload.bad_name"}}" data-msg-failed="{{t $.Lang "upload.failed"}}" data-msg-no_space="{{t $.Lang "upload.no_space"}}"
@@ -10,61 +58,34 @@
  data-msg-empty_skipped="{{t $.Lang "upload.empty_skipped"}}" data-msg-reading="{{t $.Lang "upload.reading"}}"
  data-msg-conflict_prompt="{{t $.Lang "upload.conflict_prompt"}}" data-msg-conflict_trashed="{{t $.Lang "upload.conflict_trashed"}}"
  data-msg-conflict_wait="{{t $.Lang "upload.conflict_wait"}}" data-msg-folder_exists="{{t $.Lang "upload.folder_exists"}}" data-msg-parent_exists="{{t $.Lang "upload.parent_exists"}}"
- data-msg-skipped="{{t $.Lang "upload.skipped"}}">
+ data-msg-skipped="{{t $.Lang "upload.skipped"}}" data-msg-files_of="{{t $.Lang "upload.files_of"}}" data-msg-bytes="{{t $.Lang "unit.bytes"}}">
 <h2>{{t $.Lang "upload.title"}}</h2>
-<p><label for="upload-files">{{t $.Lang "upload.choose"}}</label> <input type="file" id="upload-files" multiple></p>
-<p id="upload-folder-label"><label for="upload-folder">{{t $.Lang "upload.choose_folder"}}</label> <input type="file" id="upload-folder" webkitdirectory multiple></p>
-<p class="hint">{{t $.Lang "upload.drop_hint"}}</p>
-<p><button type="button" id="upload-start">{{t $.Lang "upload.start"}}</button> <button type="button" id="upload-cancel" hidden>{{t $.Lang "upload.cancel_all"}}</button></p>
-<p>{{t $.Lang "upload.overall"}} <progress id="upload-total" max="100" value="0"></progress> <span id="upload-total-text"></span></p>
-<ul id="upload-list"></ul>
+<div class="pickers">
+<div><input type="file" id="upload-files" class="sr" multiple><label class="btn" for="upload-files">{{template "icon" "file-up"}}{{t $.Lang "upload.choose"}}</label></div>
+<div id="upload-folder-label"><input type="file" id="upload-folder" class="sr" webkitdirectory multiple><label class="btn" for="upload-folder">{{template "icon" "folder-up"}}{{t $.Lang "upload.choose_folder"}}</label></div>
+</div>
+<p class="note">{{template "icon" "upload"}}<span>{{t $.Lang "upload.drop_hint"}}</span></p>
+<p class="note">{{template "icon" "info"}}<span>{{t $.Lang "upload.no_empty"}}</span></p>
+<div id="upload-activity" class="activity" hidden>
+<p class="progress-head"><span id="upload-count"></span><span id="upload-total-text"></span></p>
+<progress id="upload-total" max="100" value="0" aria-label="{{t $.Lang "upload.overall"}}"></progress>
+<div class="activity-actions"><button type="button" id="upload-start" class="btn primary">{{template "icon" "upload"}}{{t $.Lang "upload.start"}}</button> <button type="button" id="upload-cancel" class="btn" hidden>{{t $.Lang "upload.cancel_all"}}</button></div>
 <div id="upload-conflict" class="upload-conflict" role="alertdialog" aria-labelledby="upload-conflict-name" hidden>
-<p><strong id="upload-conflict-name"></strong> <span id="upload-conflict-text"></span></p>
-<p><button type="button" id="upload-conflict-skip">{{t $.Lang "upload.skip"}}</button>
-<button type="button" id="upload-conflict-keep">{{t $.Lang "upload.keep_both"}}</button>
-<button type="button" id="upload-conflict-replace">{{t $.Lang "upload.replace"}}</button></p>
-<p><label><input type="checkbox" id="upload-conflict-all"> {{t $.Lang "upload.apply_all"}}</label></p>
+<p class="conflict-text">{{template "icon" "circle-help"}}<span><strong id="upload-conflict-name"></strong> <span id="upload-conflict-text"></span></span></p>
+<p class="conflict-actions"><button type="button" id="upload-conflict-skip" class="btn">{{t $.Lang "upload.skip"}}</button>
+<button type="button" id="upload-conflict-keep" class="btn">{{t $.Lang "upload.keep_both"}}</button>
+<button type="button" id="upload-conflict-replace" class="btn">{{t $.Lang "upload.replace"}}</button></p>
+<p class="muted small">{{t $.Lang "upload.replace_note"}}</p>
+<label class="check"><input type="checkbox" id="upload-conflict-all"> {{t $.Lang "upload.apply_all"}}</label>
+</div>
+<ul id="upload-list"></ul>
 </div>
 <p id="upload-status" role="status"></p>
 </section>
 <script src="/static/vendor/tus-js-client/tus.min.js" defer></script>
 <script src="/static/upload.js" defer></script>
+{{end}}</div>
+{{if not .ReadOnly}}<div class="drop-overlay" aria-hidden="true"><div class="card drop-card"><span class="tile drop-tile">{{template "icon" "upload"}}</span><p class="drop-title">{{t $.Lang "upload.drop_to" $.Title}}</p><p class="note">{{template "icon" "info"}}<span>{{t $.Lang "upload.no_empty"}}</span></p></div></div>
+{{end}}<script src="/static/browse.js" defer></script>
 {{end}}
-{{if not .ReadOnly}}<form class="mkdir" method="post" action="{{.MkdirURL}}">
-<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
-<input type="hidden" name="op" value="mkdir">
-<label>{{t $.Lang "browse.folder_name"}} <input type="text" name="name" required maxlength="255" autocomplete="off"></label>
-<button type="submit">{{t $.Lang "browse.create_folder"}}</button>
-</form>
-{{end}}{{if .Empty}}<p class="empty">{{t $.Lang "browse.empty"}}</p>
-{{else}}<p class="actions"><a href="{{.ZipHref}}">{{t $.Lang "browse.zip_folder"}}</a></p>
-{{/* One selection form for every row action; each action is a submit button named
-     "op" (zip here; delete from #10). Plain HTML, works with JS off, and read-only
-     Users get it too (a download is not a write). */}}
-<form method="post" action="{{.Action}}" class="selection">
-<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
-<table class="files">
-<thead><tr>
-<th scope="col" class="select"><span class="sr">{{t $.Lang "browse.select"}}</span></th>
-{{range .Columns}}<th scope="col"{{if .Current}} aria-sort="{{.Sort}}"{{end}}><a href="{{.Href}}">{{t $.Lang .Label}}</a>{{if .Current}} <span aria-hidden="true">{{.Arrow}}</span>{{end}}</th>
-{{end}}</tr></thead>
-<tbody>
-{{range .Entries}}<tr class="{{if .IsDir}}dir{{else}}file{{end}}">
-<td class="select"><input type="checkbox" name="names" value="{{.Name}}" aria-label="{{t $.Lang "browse.select_item" .Name}}"></td>
-<td class="name">{{if .Href}}<a href="{{.Href}}">{{.Name}}</a>{{else}}<span>{{.Name}}</span>{{end}}</td>
-<td class="size">{{.Size}}</td>
-<td class="modified"><time datetime="{{.ISO}}">{{.Modified}}</time></td>
-</tr>
-{{end}}</tbody>
-</table>
-<p class="actions"><button type="submit" name="op" value="zip">{{t $.Lang "browse.zip_selected"}}</button>
-{{if .CanDelete}}<button type="submit" name="op" value="delete">{{t $.Lang "browse.delete_selected"}}</button>
-{{end}}</p>
-</form>
-{{if gt .Pages 1}}<nav class="pager" aria-label="{{t $.Lang "browse.pages"}}">
-{{if .PrevHref}}<a href="{{.PrevHref}}" rel="prev">{{t $.Lang "browse.prev"}}</a>{{end}}
-<span>{{t $.Lang "browse.page_of" .Page .Pages}}</span>
-{{if .NextHref}}<a href="{{.NextHref}}" rel="next">{{t $.Lang "browse.next"}}</a>{{end}}
-</nav>
-{{end}}{{end}}{{end}}
 {{template "footer" .}}

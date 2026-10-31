@@ -30,6 +30,8 @@
   var total = document.getElementById("upload-total");
   var totalText = document.getElementById("upload-total-text");
   var status = document.getElementById("upload-status");
+  var activity = document.getElementById("upload-activity");
+  var count = document.getElementById("upload-count");
   var ask = document.getElementById("upload-conflict");
   var askName = document.getElementById("upload-conflict-name");
   var askText = document.getElementById("upload-conflict-text");
@@ -53,6 +55,7 @@
   var allChoice = "";
   var askQueue = [];   // items waiting for the one Conflict dialog
   var asking = null;   // the item the dialog is about
+  var chosen = [];     // picked files not started yet: {file, rel}
 
   function percent(a, b) { return b > 0 ? Math.floor((a * 100) / b) : 100; }
 
@@ -78,36 +81,100 @@
     return false;
   }
 
-  // Rows are made lazily: a big folder has thousands of waiting files and only the ones
-  // that run or fail need a line on the page.
-  function ensureRow(it) {
-    if (it.row) { return; }
+  // Mirrors i18n.FormatSize.
+  function humanSize(n) {
+    if (n < 1024) { return n + " " + msg("bytes"); }
+    var units = ["KB", "MB", "GB", "TB"], f = n, i = -1;
+    do { f /= 1024; i++; } while (f >= 1024 && i < units.length - 1);
+    return f.toFixed(1) + " " + units[i];
+  }
+
+  function setIcon(row, name) {
+    row.querySelector("use").setAttribute("href", "/static/icons.svg#" + name);
+  }
+
+  function newRow(rel, onCancel) {
     var row = document.createElement("li");
+    row.className = "upload-row";
+    var icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("class", "icon");
+    icon.setAttribute("aria-hidden", "true");
+    icon.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "use"));
+    var main = document.createElement("div");
+    main.className = "upload-main";
     var name = document.createElement("span");
     name.className = "upload-name";
-    name.textContent = it.rel;
+    name.title = rel;
+    name.textContent = rel;
+    var line = document.createElement("span");
+    line.className = "upload-line";
+    var text = document.createElement("span");
+    text.className = "upload-state";
+    var detail = document.createElement("span");
     var bar = document.createElement("progress");
     bar.max = 100;
     bar.value = 0;
-    var text = document.createElement("span");
-    text.className = "upload-state";
+    bar.hidden = true;
     var cancel = document.createElement("button");
     cancel.type = "button";
+    cancel.className = "link-btn";
     cancel.textContent = msg("cancel");
-    cancel.addEventListener("click", function () { cancelItem(it); });
-    row.appendChild(name);
-    row.appendChild(bar);
-    row.appendChild(text);
+    cancel.addEventListener("click", onCancel);
+    line.appendChild(text);
+    line.appendChild(detail);
+    main.appendChild(name);
+    main.appendChild(line);
+    main.appendChild(bar);
+    row.appendChild(icon);
+    row.appendChild(main);
     row.appendChild(cancel);
     list.appendChild(row);
-    it.row = row; it.bar = bar; it.text = text; it.cancel = cancel;
+    return { row: row, bar: bar, text: text, detail: detail, cancel: cancel };
+  }
+
+  // Rows are made lazily: a big folder has thousands of waiting files, so above KEEP_ROWS
+  // only the ones that run or fail get a line on the page.
+  function ensureRow(it) {
+    if (it.row) { return; }
+    var r = newRow(it.rel, function () { cancelItem(it); });
+    it.row = r.row; it.bar = r.bar; it.text = r.text; it.detail = r.detail; it.cancel = r.cancel;
+  }
+
+  // The icon says why a row stopped: colour alone must not carry it.
+  function iconFor(state, text) {
+    switch (state) {
+    case "waiting": return "clock";
+    case "running": return "loader-circle";
+    case "asking": return "circle-help";
+    case "done": return "circle-check";
+    case "skipped": return "skip-forward";
+    case "cancelled": return "circle-minus";
+    }
+    if (text === msg("refused")) { return "ban"; }
+    if (text === msg("bad_name")) { return "file-x"; }
+    if (text === msg("no_space")) { return "hard-drive"; }
+    return "circle-alert";
+  }
+
+  function setDetail(it) {
+    if (!it.row) { return; }
+    var size = it.file ? it.file.size : 0;
+    if (it.state === "running" && it.file) {
+      it.detail.textContent = " · " + percent(it.sent, size) + "% · " + humanSize(it.sent) + " / " + humanSize(size);
+    } else {
+      it.detail.textContent = it.state === "waiting" && it.file ? " · " + humanSize(size) : "";
+    }
   }
 
   function setState(it, state, text) {
     it.state = state;
-    if (state !== "waiting") { ensureRow(it); }
+    if (state !== "waiting" || items.length <= KEEP_ROWS) { ensureRow(it); }
     if (it.row) {
+      it.row.setAttribute("data-state", state);
+      setIcon(it.row, iconFor(state, text));
       it.text.textContent = text;
+      it.bar.hidden = state !== "running";
+      setDetail(it);
       it.cancel.hidden = state === "done" || state === "failed" || state === "cancelled" || state === "exists" || state === "skipped";
       if (state === "done" && items.length > KEEP_ROWS) {
         list.removeChild(it.row);
@@ -117,14 +184,42 @@
   }
 
   function refreshTotal() {
-    var sent = 0, size = 0;
+    var sent = 0, size = 0, over = 0;
     for (var i = 0; i < items.length; i++) {
       size += items[i].file ? items[i].file.size : 0;
       sent += items[i].state === "done" && items[i].file ? items[i].file.size : items[i].sent;
+      if (items[i].settled || items[i].state === "cancelled") { over++; }
     }
     var p = percent(sent, size);
     total.value = p;
     totalText.textContent = p + "%";
+    count.textContent = fmt(msg("files_of"), [over, items.length]);
+  }
+
+  // What was picked, listed before Upload is pressed; a row can still be dropped.
+  function showChosen() {
+    list.innerHTML = "";
+    chosen.slice(0, KEEP_ROWS).forEach(function (c) {
+      var r = newRow(c.rel, function () {
+        chosen.splice(chosen.indexOf(c), 1);
+        showChosen();
+      });
+      r.row.setAttribute("data-state", "waiting");
+      setIcon(r.row, "clock");
+      r.text.textContent = msg("waiting");
+      r.detail.textContent = " · " + humanSize(c.file.size);
+    });
+    status.textContent = "";
+    total.value = 0;
+    totalText.textContent = "0%";
+    count.textContent = fmt(msg("files_of"), [0, chosen.length]);
+    cancelBtn.hidden = false;
+    activity.hidden = chosen.length === 0;
+  }
+
+  function clearPicks() {
+    input.value = "";
+    if (folderInput) { folderInput.value = ""; }
   }
 
   function failureText(err) {
@@ -352,6 +447,7 @@
       onProgress: function (sent, size) {
         it.sent = sent;
         if (it.bar) { it.bar.value = percent(sent, size); }
+        setDetail(it);
         refreshTotal();
       },
       onSuccess: function () {
@@ -371,7 +467,7 @@
   function add(file, rel, error) {
     rel = nfc(rel);
     if (isOSNoise(rel)) { return null; }
-    var it = { file: file, rel: rel, row: null, bar: null, text: null, cancel: null, upload: null, sent: 0, state: "waiting", settled: false };
+    var it = { file: file, rel: rel, row: null, bar: null, text: null, detail: null, cancel: null, upload: null, sent: 0, state: "waiting", settled: false };
     items.push(it);
     if (error) {
       it.settled = true;
@@ -405,13 +501,19 @@
       skippedEmpty = 0;
       list.innerHTML = "";
     }
+    chosen = [];
+    clearPicks();
     skippedEmpty += empty || 0;
     for (var i = 0; i < picked.length; i++) { add(picked[i].file, picked[i].rel, picked[i].error); }
     if (items.length === 0) {
+      status.classList.remove("reading");
       status.textContent = skippedEmpty > 0 ? fmt(msg("empty_skipped"), [skippedEmpty]) : "";
+      activity.hidden = true;
       return;
     }
+    status.classList.remove("reading");
     status.textContent = "";
+    activity.hidden = false;
     refreshTotal();
     allChoice = "";
     startBtn.disabled = true;
@@ -420,17 +522,25 @@
   }
 
   startBtn.addEventListener("click", function () {
-    if (startBtn.disabled) { return; }
-    var picked = [], i, f;
+    if (startBtn.disabled || chosen.length === 0) { return; }
+    begin(chosen);
+  });
+
+  function picksChanged() {
+    if (startBtn.disabled) { return; } // the running selection is not touched
+    var i, f;
+    chosen = [];
     var files = input.files || [];
-    for (i = 0; i < files.length; i++) { picked.push({ file: files[i], rel: files[i].name }); }
+    for (i = 0; i < files.length; i++) { chosen.push({ file: files[i], rel: files[i].name }); }
     files = folderInput && folderInput.files ? folderInput.files : [];
     for (i = 0; i < files.length; i++) {
       f = files[i];
-      picked.push({ file: f, rel: f.webkitRelativePath || f.name });
+      chosen.push({ file: f, rel: f.webkitRelativePath || f.name });
     }
-    begin(picked);
-  });
+    showChosen();
+  }
+  input.addEventListener("change", picksChanged);
+  if (folderInput) { folderInput.addEventListener("change", picksChanged); }
 
   function pick(choice) { return function () { if (asking && asking.onChoice) { asking.onChoice(choice); } }; }
   document.getElementById("upload-conflict-skip").addEventListener("click", pick("skip"));
@@ -439,6 +549,12 @@
 
   cancelBtn.addEventListener("click", function () {
     var i;
+    if (!startBtn.disabled) { // only a pick so far: drop it
+      chosen = [];
+      clearPicks();
+      showChosen();
+      return;
+    }
     for (i = 0; i < items.length; i++) { // waiting ones first, so none starts meanwhile
       if (items[i].state === "waiting") { cancelItem(items[i]); }
     }
@@ -496,17 +612,17 @@
   document.addEventListener("dragover", function (ev) {
     if (!hasFiles(ev.dataTransfer)) { return; }
     ev.preventDefault();
-    panel.classList.add("dragging");
+    document.body.classList.add("dragging");
   });
   document.addEventListener("dragleave", function (ev) {
-    if (!ev.relatedTarget) { panel.classList.remove("dragging"); }
+    if (!ev.relatedTarget) { document.body.classList.remove("dragging"); }
   });
 
   document.addEventListener("drop", function (ev) {
     var dt = ev.dataTransfer;
     if (!hasFiles(dt)) { return; }
     ev.preventDefault();
-    panel.classList.remove("dragging");
+    document.body.classList.remove("dragging");
     // Entries must be taken now: the DataTransfer is emptied once this handler returns.
     var entries = [], plain = [], i, e;
     if (dt.items && dt.items.length && dt.items[0].webkitGetAsEntry) {
@@ -521,7 +637,10 @@
     var found = { files: [], empty: 0 };
     for (i = 0; i < plain.length; i++) { found.files.push({ file: plain[i], rel: plain[i].name }); }
     reading++;
-    if (startBtn.disabled === false) { status.textContent = msg("reading"); }
+    if (startBtn.disabled === false) {
+      status.textContent = msg("reading");
+      status.classList.add("reading");
+    }
     entries.reduce(function (p, entry) {
       return p.then(function () { return walk(entry, "", found); });
     }, Promise.resolve()).then(function () {
