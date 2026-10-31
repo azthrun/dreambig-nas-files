@@ -27,9 +27,8 @@ var errInternal = handler.NewError("ERR_INTERNAL_SERVER_ERROR", "internal error"
 // its Upload data in <mount>/.nas-files-staging, on the Mount's own filesystem, so the
 // completed file can be hard-linked into place. A new Upload goes to the Mount named in
 // its (server-set) metadata; an existing one is found by scanning the Staging Areas.
-//
-// It is the seam for #14: expiry lists and terminates what each Staging Area holds, and
-// the free-space reserve is checked in NewUpload.
+// The Keeper lists and terminates what each Staging Area holds (expiry) and gets an
+// activity mark from every write.
 type store struct {
 	mounts map[string]mounts.Mount // writable Mounts by name
 	order  []string                // names, for stable scans

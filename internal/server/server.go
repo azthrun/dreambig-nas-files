@@ -21,8 +21,8 @@ import (
 	"github.com/azthrun/dreambig-nas-files/internal/web"
 )
 
-// Deps is everything the application needs from outside. Later tickets add fields
-// (users, Access, free-space probe, ...); main and testenv are the only constructors.
+// Deps is everything the application needs from outside. main and testenv are the only
+// constructors.
 type Deps struct {
 	// Mounts are the validated Mounts from mounts.Discover. At least one.
 	Mounts []mounts.Mount

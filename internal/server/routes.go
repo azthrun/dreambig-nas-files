@@ -35,8 +35,8 @@ func (s *server) routes() http.Handler {
 
 // withFiles sends everything under /files straight to its handlers, bypassing the
 // ServeMux, whose path cleaning would redirect "..", "." and "//" instead of letting
-// the Path resolver refuse them. Later tickets add their /files/... methods in
-// filesRoute, always behind s.protected.
+// the Path resolver refuse them. Everything under /files is served by filesRoute,
+// always behind s.protected.
 func (s *server) withFiles(mux http.Handler) http.Handler {
 	files := s.protected(s.filesRoute)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -61,10 +61,10 @@ func (s *server) filesRoute(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// filesPost dispatches POST /files/<Path> by the form field op. Later tickets add their
-// plain-form operations here. op=zip is the browse selection form's download button
-// (names= checkboxes of the folder in the URL); op=delete (confirm page) and
-// op=delete-confirm (the move to the Trash) share that form.
+// filesPost dispatches POST /files/<Path> by the form field op: mkdir, zip (the browse
+// selection form's download button, names= checkboxes of the folder in the URL), delete
+// (the confirm page) and delete-confirm (the move to the Trash); the last three share
+// the selection form.
 func (s *server) filesPost(w http.ResponseWriter, r *http.Request) {
 	switch r.PostFormValue("op") {
 	case "mkdir":

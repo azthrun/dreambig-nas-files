@@ -1,10 +1,12 @@
 // Package trash is the Trash of each writable Mount (GLOSSARY.md): deleted and replaced
 // content moves to <Mount>/.nas-files-trash/<YYYY-MM-DD>/<original path in the Mount>
-// by an atomic rename inside the same filesystem, never overwriting a Trash entry, and
-// is purged after the retention period.
+// inside the same filesystem, never overwriting a Trash entry, and is purged after the
+// retention period. A folder is renamed; a file is hard-linked into the Trash and then
+// unlinked (rename would replace silently), falling back to a rename where the
+// filesystem cannot hard-link. Either way the content never leaves the Mount.
 //
 // Place is the one operation that puts something in the Trash; the delete handler and
-// the later "replace on Conflict" both use it.
+// "replace on Conflict" both use it.
 package trash
 
 import (

@@ -62,9 +62,9 @@ const (
 )
 
 // Placer is the completion seam. The default, ChoicePlacer, applies the User's Conflict
-// choice; LinkPlacer refuses an existing Path. #13 supplies one that also creates missing
-// parent folders. A Placer must never overwrite silently, and returns ErrConflict when it
-// declines. The caller removes the staged name afterwards.
+// choice; LinkPlacer refuses an existing Path. Missing parent folders are made before
+// the Placer runs (makeParents). A Placer must never overwrite silently, and returns
+// ErrConflict when it declines. The Handler removes the staged name afterwards.
 type Placer interface {
 	Place(ctx context.Context, p Placement) error
 }
