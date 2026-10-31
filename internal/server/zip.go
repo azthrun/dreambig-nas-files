@@ -48,7 +48,7 @@ func (s *server) zipSelection(w http.ResponseWriter, r *http.Request, user strin
 	}
 	picked := r.PostForm["names"]
 	if len(picked) == 0 {
-		s.errorPage(w, r, http.StatusBadRequest, "error.no_selection")
+		s.refuse(w, r, "zip", user, p.String(), errNothingSelected, false)
 		return
 	}
 	var items []zipItem

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/upload"
 	"github.com/azthrun/dreambig-nas-files/internal/web"
 )
@@ -57,7 +58,7 @@ func (s *server) filesRoute(w http.ResponseWriter, r *http.Request) {
 		s.filesPost(w, r)
 	default:
 		w.Header().Set("Allow", "GET, HEAD, POST")
-		s.errorPage(w, r, http.StatusMethodNotAllowed, "error.method")
+		s.refuseRoute(w, r, http.StatusMethodNotAllowed)
 	}
 }
 
@@ -81,8 +82,15 @@ func (s *server) filesPost(w http.ResponseWriter, r *http.Request) {
 	case "delete-confirm":
 		s.deleteItems(w, r)
 	default:
-		s.errorPage(w, r, http.StatusBadRequest, "error.method")
+		s.refuseRoute(w, r, http.StatusBadRequest)
 	}
+}
+
+// refuseRoute audits and answers a /files request that no handler takes: a method or a
+// form operation that does not exist.
+func (s *server) refuseRoute(w http.ResponseWriter, r *http.Request, status int) {
+	s.audit.Record(audit.Event{User: sessionOf(r).User, Operation: "files", Path: requestedPath(r), Outcome: audit.Refused, Status: status})
+	s.errorPage(w, r, status, "error.method")
 }
 
 // wrap applies middleware common to every route: security headers. Nothing here needs

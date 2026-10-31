@@ -39,21 +39,36 @@ func (s *server) protected(h http.HandlerFunc) http.Handler {
 		sess := s.currentSession(w, r)
 		if sess == nil {
 			if safeMethod(r.Method) {
+				s.audit.Record(audit.Event{Operation: "session", Path: requestedPath(r), Outcome: audit.Refused, Status: http.StatusSeeOther})
 				http.Redirect(w, r, "/login", http.StatusSeeOther)
 				return
 			}
-			s.audit.Record(audit.Event{Operation: "session", Outcome: audit.Refused, Status: http.StatusUnauthorized})
+			s.audit.Record(audit.Event{Operation: "session", Path: requestedPath(r), Outcome: audit.Refused, Status: http.StatusUnauthorized})
 			s.errorPage(w, r, http.StatusUnauthorized, "error.unauthorized")
 			return
 		}
 		if !safeMethod(r.Method) && !validCSRF(r, sess) {
-			s.audit.Record(audit.Event{User: sess.User, Operation: "csrf", Outcome: audit.Refused, Status: http.StatusForbidden})
+			s.audit.Record(audit.Event{User: sess.User, Operation: "csrf", Path: requestedPath(r), Outcome: audit.Refused, Status: http.StatusForbidden})
 			s.errorPage(w, r, http.StatusForbidden, "error.forbidden")
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
 		h(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, sess)))
 	})
+}
+
+// requestedPath is the Path a /files request names, for the audit line of a request that
+// was refused before any handler ran; empty for other routes and for a string that is
+// not a valid Path.
+func requestedPath(r *http.Request) string {
+	if !strings.HasPrefix(r.URL.Path, filesPrefix+"/") {
+		return ""
+	}
+	p, err := pathFromRequest(r)
+	if err != nil {
+		return ""
+	}
+	return p.String()
 }
 
 func safeMethod(m string) bool {
