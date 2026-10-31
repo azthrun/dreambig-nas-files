@@ -3,7 +3,7 @@
 //
 // An Upload's data waits in the Staging Area of the Mount it will land in
 // (<mount>/.nas-files-staging, a Hidden Entry) until the last byte arrives; then the
-// Placer puts it at its Path. Partial data is never at the Path, never listed and never
+// ChoicePlacer puts it at its Path. Partial data is never at the Path, never listed and never
 // downloadable.
 //
 // tus Upload-Metadata the browser sends:
@@ -92,8 +92,6 @@ type Config struct {
 	// Trash is where Replace puts the old file; it must be the server's Trash so deletes
 	// and replacements share one write lock. Nil disables replace.
 	Trash Trasher
-	// Place completes an Upload; nil means a ChoicePlacer over Trash.
-	Place Placer
 }
 
 // Handler serves the tus endpoint. Mount it behind the session and CSRF middleware and
@@ -102,6 +100,7 @@ type Handler struct {
 	Config
 	store *store
 	tus   *handler.UnroutedHandler
+	place ChoicePlacer
 }
 
 // New builds a Handler.
@@ -109,13 +108,10 @@ func New(cfg Config) (*Handler, error) {
 	if cfg.Log == nil {
 		cfg.Log = slog.New(slog.DiscardHandler)
 	}
-	if cfg.Place == nil {
-		cfg.Place = ChoicePlacer{Trash: cfg.Trash, Log: cfg.Log}
-	}
 	if cfg.Keeper == nil {
 		cfg.Keeper = NewKeeper(KeeperConfig{Mounts: cfg.Mounts, Audit: cfg.Audit, Log: cfg.Log})
 	}
-	h := &Handler{Config: cfg, store: newStore(cfg.Mounts, cfg.Log, cfg.Keeper)}
+	h := &Handler{Config: cfg, store: newStore(cfg.Mounts, cfg.Log, cfg.Keeper), place: ChoicePlacer{Trash: cfg.Trash, Log: cfg.Log}}
 
 	composer := handler.NewStoreComposer()
 	composer.UseCore(h.store)
@@ -175,13 +171,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, user string)
 	id = strings.TrimSuffix(id, "/resolve")
 	st := &reqState{user: user}
 	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-	body := &countingReader{r: r.Body}
 	// tusd takes the Upload ID to be the whole request path.
 	r2 := r.Clone(context.WithValue(r.Context(), ctxKey{}, st))
 	r2.URL.Path, r2.URL.RawPath = "/"+id, ""
-	if r.Body != nil {
-		r2.Body = body
-	}
 	switch {
 	case id == "skip": // not an Upload: the User's report that a file is not being sent
 		h.skip(rec, r2, st)
@@ -201,7 +193,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, user string)
 	default:
 		h.item(rec, r2, id, st)
 	}
-	h.record(r.Method, rec.status, st, body.n)
+	h.record(r.Method, rec.status, st)
 }
 
 // owned loads Upload id for the User of the request. To anyone else an Upload does not
@@ -303,8 +295,7 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request, id string, st 
 			writeTusError(w, errInternal)
 			return
 		}
-		w.Header().Set("Tus-Resumable", "1.0.0")
-		w.WriteHeader(http.StatusNoContent)
+		tusNoContent(w)
 		return
 	case ChoiceKeep, ChoiceReplace:
 	default:
@@ -316,8 +307,7 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request, id string, st 
 		writeTusError(w, h.tusError(ctx, err))
 		return
 	}
-	w.Header().Set("Tus-Resumable", "1.0.0")
-	w.WriteHeader(http.StatusNoContent)
+	tusNoContent(w)
 }
 
 // skip records the User's choice to skip a file at its Path before any data is sent:
@@ -339,8 +329,7 @@ func (h *Handler) skip(w http.ResponseWriter, r *http.Request, st *reqState) {
 		writeTusError(w, h.tusError(r.Context(), err))
 		return
 	}
-	w.Header().Set("Tus-Resumable", "1.0.0")
-	w.WriteHeader(http.StatusNoContent)
+	tusNoContent(w)
 }
 
 // isConflict is true for the errors that mean "the Path is not free": the staged data is
@@ -354,7 +343,7 @@ func isConflict(err error) bool {
 
 // record writes the audit line for a finished request: creation, completion, cancel, and
 // every refusal or failure. Progress PATCHes and routine HEADs are not audited.
-func (h *Handler) record(method string, status int, st *reqState, bytes int64) {
+func (h *Handler) record(method string, status int, st *reqState) {
 	ev := audit.Event{User: st.user, Path: st.path, Status: status, Choice: string(st.choice), Requested: st.requested}
 	switch {
 	case status == http.StatusInsufficientStorage:
@@ -424,7 +413,7 @@ func (h *Handler) destination(user, raw string) (resolver.Path, resolver.Locatio
 // run at creation and again at completion: destination, then the Conflict and
 // parent-folder checks. Missing parent folders are allowed (Folder Uploads create them at
 // completion) but every name to be created must pass the name rules. A non-empty choice
-// lets an existing file stand: the Placer applies it.
+// lets an existing file stand: the ChoicePlacer applies it.
 func (h *Handler) check(user, raw string, choice Choice) (resolver.Path, resolver.Location, error) {
 	p, loc, err := h.destination(user, raw)
 	if err != nil {
@@ -439,7 +428,7 @@ func (h *Handler) check(user, raw string, choice Choice) (resolver.Path, resolve
 		if choice == "" {
 			return p, loc, ErrConflict
 		}
-		return p, loc, nil // the Placer applies the choice
+		return p, loc, nil // the ChoicePlacer applies the choice
 	}
 	if err := h.checkParents(p); err != nil {
 		return p, loc, err
@@ -477,7 +466,7 @@ func (h *Handler) preCreate(ev handler.HookEvent) (handler.HTTPResponse, handler
 }
 
 // preFinish completes an Upload whose last byte has arrived. Everything is checked again
-// (a late Conflict is possible), then the Placer puts the data at its Path. On a late
+// (a late Conflict is possible), then the ChoicePlacer puts the data at its Path. On a late
 // Conflict the staged data is kept and the User decides (resolve); on any other failure
 // it is discarded, so a retry cannot find a "complete" Upload that never landed.
 func (h *Handler) preFinish(ev handler.HookEvent) (handler.HTTPResponse, error) {
@@ -530,7 +519,7 @@ func (h *Handler) complete(ctx context.Context, st *reqState, u handler.Upload, 
 		return err
 	}
 	final := loc.Rel()
-	if err := h.Place.Place(ctx, Placement{User: st.user, Dest: loc, Staged: stagedName(info.ID), Choice: choice, Final: &final}); err != nil {
+	if err := h.place.Place(Placement{User: st.user, Dest: loc, Staged: stagedName(info.ID), Choice: choice, Final: &final}); err != nil {
 		return err
 	}
 	if final != loc.Rel() { // keep both: the audit line names where the file is
@@ -546,7 +535,7 @@ func (h *Handler) complete(ctx context.Context, st *reqState, u handler.Upload, 
 	return nil
 }
 
-// tusError turns a resolver, Access or Placer error into a tus error without NAS paths.
+// tusError turns a resolver, Access or placement error into a tus error without NAS paths.
 func (h *Handler) tusError(ctx context.Context, err error) error {
 	var te handler.Error
 	if errors.As(err, &te) {
@@ -575,6 +564,14 @@ func (h *Handler) tusError(ctx context.Context, err error) error {
 	return errInternal
 }
 
+// tusVersion is the protocol version our own tus-shaped answers carry.
+const tusVersion = "1.0.0"
+
+func tusNoContent(w http.ResponseWriter) {
+	w.Header().Set("Tus-Resumable", tusVersion)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func writeTusError(w http.ResponseWriter, err error) {
 	var te handler.Error
 	if !errors.As(err, &te) {
@@ -583,7 +580,7 @@ func writeTusError(w http.ResponseWriter, err error) {
 	for k, v := range te.HTTPResponse.Header {
 		w.Header().Set(k, v)
 	}
-	w.Header().Set("Tus-Resumable", "1.0.0")
+	w.Header().Set("Tus-Resumable", tusVersion)
 	w.WriteHeader(te.HTTPResponse.StatusCode)
 	_, _ = io.WriteString(w, te.HTTPResponse.Body)
 }
@@ -601,24 +598,3 @@ func (s *statusRecorder) WriteHeader(code int) {
 }
 
 func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
-
-type countingReader struct {
-	r io.ReadCloser
-	n int64
-}
-
-func (c *countingReader) Read(p []byte) (int, error) {
-	if c.r == nil {
-		return 0, io.EOF
-	}
-	n, err := c.r.Read(p)
-	c.n += int64(n)
-	return n, err
-}
-
-func (c *countingReader) Close() error {
-	if c.r == nil {
-		return nil
-	}
-	return c.r.Close()
-}

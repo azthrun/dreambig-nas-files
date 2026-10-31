@@ -86,7 +86,7 @@ func (s *server) dropFromZip(user string, folder, child resolver.Path, err error
 	if child.IsRoot() {
 		path = folder.String()
 	}
-	s.audit.Record(audit.Event{User: user, Operation: "zip", Path: path, Outcome: audit.Refused, Status: statusOf(err)})
+	s.Audit.Record(audit.Event{User: user, Operation: "zip", Path: path, Outcome: audit.Refused, Status: statusOf(err)})
 }
 
 // streamZip writes the zip while walking: headers sent at once, the work ended by the
@@ -125,5 +125,5 @@ func (s *server) streamZip(w http.ResponseWriter, r *http.Request, user string, 
 		ev.Outcome = audit.Partial
 		ev.Omitted = omitted
 	}
-	s.audit.Record(ev)
+	s.Audit.Record(ev)
 }

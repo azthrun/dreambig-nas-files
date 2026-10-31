@@ -43,16 +43,16 @@ func (s *server) protected(h http.HandlerFunc) http.Handler {
 		sess := s.currentSession(w, r)
 		if sess == nil {
 			if safeMethod(r.Method) {
-				s.audit.Record(audit.Event{Operation: "session", Path: requestedPath(r), Outcome: audit.Refused, Status: http.StatusSeeOther})
+				s.Audit.Record(audit.Event{Operation: "session", Path: requestedPath(r), Outcome: audit.Refused, Status: http.StatusSeeOther})
 				http.Redirect(w, r, "/login", http.StatusSeeOther)
 				return
 			}
-			s.audit.Record(audit.Event{Operation: "session", Path: requestedPath(r), Outcome: audit.Refused, Status: http.StatusUnauthorized})
+			s.Audit.Record(audit.Event{Operation: "session", Path: requestedPath(r), Outcome: audit.Refused, Status: http.StatusUnauthorized})
 			s.errorPage(w, r, http.StatusUnauthorized, "error.unauthorized")
 			return
 		}
 		if !safeMethod(r.Method) && !validCSRF(r, sess) {
-			s.audit.Record(audit.Event{User: sess.User, Operation: "csrf", Path: requestedPath(r), Outcome: audit.Refused, Status: http.StatusForbidden})
+			s.Audit.Record(audit.Event{User: sess.User, Operation: "csrf", Path: requestedPath(r), Outcome: audit.Refused, Status: http.StatusForbidden})
 			s.errorPage(w, r, http.StatusForbidden, "error.forbidden")
 			return
 		}
@@ -158,7 +158,7 @@ func (s *server) loginForm(w http.ResponseWriter, r *http.Request) {
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	name, password := r.PostFormValue("name"), r.PostFormValue("password")
 	fail := func(status int, key string) {
-		s.audit.Record(audit.Event{User: name, Operation: "signin", Outcome: audit.Refused, Status: status})
+		s.Audit.Record(audit.Event{User: name, Operation: "signin", Outcome: audit.Refused, Status: status})
 		s.render(w, r, status, "login.html", page{Title: i18n.T(langOf(r), "signin.title"), Name: name, Error: i18n.T(langOf(r), key)})
 	}
 	forgive, ok := s.limiter.Try(limiter.UserKey(name), limiter.IPKey(clientIP(r)))
@@ -177,7 +177,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	forgive()
 	token := s.sessions.create(user.Name)
 	setSessionCookie(w, token, int(sessionLifetime.Seconds()))
-	s.audit.Record(audit.Event{User: user.Name, Operation: "signin", Outcome: audit.OK, Status: http.StatusSeeOther})
+	s.Audit.Record(audit.Event{User: user.Name, Operation: "signin", Outcome: audit.OK, Status: http.StatusSeeOther})
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -186,7 +186,7 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 		s.sessions.delete(c.Value)
 	}
 	setSessionCookie(w, "", -1)
-	s.audit.Record(audit.Event{User: sessionOf(r).User, Operation: "signout", Outcome: audit.OK, Status: http.StatusSeeOther})
+	s.Audit.Record(audit.Event{User: sessionOf(r).User, Operation: "signout", Outcome: audit.OK, Status: http.StatusSeeOther})
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 

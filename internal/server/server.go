@@ -48,7 +48,6 @@ type Deps struct {
 
 type server struct {
 	Deps
-	audit    *audit.Logger // s.audit.Record(audit.Event{...}) is the one audit API
 	sessions *sessions
 	limiter  *limiter.Limiter
 	tmpl     *template.Template
@@ -92,13 +91,12 @@ func New(d Deps) (http.Handler, error) {
 	s := &server{
 		res:      res,
 		Deps:     d,
-		audit:    d.Audit,
 		sessions: newSessions(d.Clock),
 		limiter:  limiter.New(d.Clock),
 		tmpl:     tmpl,
 	}
 	up, err := upload.New(upload.Config{
-		Mounts: d.Mounts, Resolver: res, Trash: d.Trash, Audit: s.audit, Log: d.Log, StatusOf: statusOf, Keeper: d.Uploads,
+		Mounts: d.Mounts, Resolver: res, Trash: d.Trash, Audit: s.Audit, Log: d.Log, StatusOf: statusOf, Keeper: d.Uploads,
 		Authorize: func(user string, loc resolver.Location) error { return s.authorize(user, loc, access.Write) },
 	})
 	if err != nil {

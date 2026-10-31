@@ -88,7 +88,7 @@ func (s *server) mkdir(w http.ResponseWriter, r *http.Request) {
 		fail(err)
 		return
 	}
-	s.audit.Record(audit.Event{User: user, Operation: "mkdir", Path: child.String(), Outcome: audit.OK, Status: http.StatusSeeOther})
+	s.Audit.Record(audit.Event{User: user, Operation: "mkdir", Path: child.String(), Outcome: audit.OK, Status: http.StatusSeeOther})
 	http.Redirect(w, r, folderHref(parent), http.StatusSeeOther)
 }
 

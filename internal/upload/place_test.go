@@ -1,7 +1,6 @@
 package upload_test
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -92,7 +91,7 @@ func TestReplaceNeverLosesTheOldFileWhenTheNewOneCannotBeLinked(t *testing.T) {
 	f := newFixture(t, false) // the staged data is gone, so the link fails after the old file was trashed
 	p := upload.ChoicePlacer{Trash: f.tr}
 
-	err := p.Place(context.Background(), upload.Placement{User: "alice", Dest: f.loc, Staged: f.stg, Choice: upload.ChoiceReplace})
+	err := p.Place(upload.Placement{User: "alice", Dest: f.loc, Staged: f.stg, Choice: upload.ChoiceReplace})
 
 	if err == nil {
 		t.Fatal("Place succeeded without staged data")
@@ -114,7 +113,7 @@ func TestReplaceThatMeetsALateFileKeepsTheOldOneInTheTrashAndNeverOverwrites(t *
 	}
 	p := upload.ChoicePlacer{Trash: racyTrash{Trash: f.tr, appear: appear}}
 
-	err := p.Place(context.Background(), upload.Placement{User: "alice", Dest: f.loc, Staged: f.stg, Choice: upload.ChoiceReplace})
+	err := p.Place(upload.Placement{User: "alice", Dest: f.loc, Staged: f.stg, Choice: upload.ChoiceReplace})
 
 	if !errors.Is(err, upload.ErrConflict) {
 		t.Fatalf("err = %v, want a Conflict", err)

@@ -1,7 +1,6 @@
 package upload
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -17,7 +16,7 @@ import (
 )
 
 // ErrConflict means the Path already holds something (or a file stands where a folder
-// should be). It is what a Placer returns to refuse; the User gets 409.
+// should be). It is how a placement is refused; the User gets 409.
 var ErrConflict = errors.New("a file already exists at that Path")
 
 // Placement is one completed Upload waiting to be put at its Path.
@@ -77,14 +76,6 @@ const (
 // known reports whether c is a choice that travels in Upload metadata (or is empty).
 func (c Choice) known() bool { return c == "" || c == ChoiceKeep || c == ChoiceReplace }
 
-// Placer is the completion seam. The default, ChoicePlacer, applies the User's Conflict
-// choice; LinkPlacer refuses an existing Path. Missing parent folders are made before
-// the Placer runs (makeParents). A Placer must never overwrite silently, and returns
-// ErrConflict when it declines. The Handler removes the staged name afterwards.
-type Placer interface {
-	Place(ctx context.Context, p Placement) error
-}
-
 // linkExclusive hard-links the staged file to rel; rename(2) would silently replace a file
 // that appeared meanwhile, link fails with EEXIST instead.
 func linkExclusive(root *os.Root, staged, rel string) error {
@@ -102,23 +93,13 @@ func linkExclusive(root *os.Root, staged, rel string) error {
 	return nil
 }
 
-// LinkPlacer completes an Upload with a create-exclusive hard link from the Staging
-// Area and refuses an existing Path, whatever the choice.
-type LinkPlacer struct{}
-
-// Place implements Placer.
-func (LinkPlacer) Place(_ context.Context, p Placement) error {
-	root, err := p.Dest.OS()
-	if err != nil {
-		return err
+// placeExclusive completes an Upload with a create-exclusive hard link from the Staging
+// Area and refuses an existing Path.
+func placeExclusive(root *os.Root, p Placement, rel string) error {
+	if err := linkExclusive(root, p.Staged, rel); err != nil {
+		return takenIsConflict(err)
 	}
-	if err := linkExclusive(root, p.Staged, p.Dest.Rel()); err != nil {
-		if errors.Is(err, errTaken) {
-			return ErrConflict
-		}
-		return err
-	}
-	p.placedAt(p.Dest.Rel())
+	p.placedAt(rel)
 	return nil
 }
 
@@ -148,8 +129,10 @@ type ChoicePlacer struct {
 // maxKeepBoth bounds the search for a free "name (n).ext".
 const maxKeepBoth = 10000
 
-// Place implements Placer.
-func (c ChoicePlacer) Place(ctx context.Context, p Placement) error {
+// Place puts a completed Upload at its Path. Missing parent folders are made before it
+// runs (makeParents). It never overwrites silently, and returns ErrConflict when it
+// declines. The Handler removes the staged name afterwards.
+func (c ChoicePlacer) Place(p Placement) error {
 	root, err := p.Dest.OS()
 	if err != nil {
 		return err
@@ -157,7 +140,7 @@ func (c ChoicePlacer) Place(ctx context.Context, p Placement) error {
 	rel := p.Dest.Rel()
 	switch p.Choice {
 	case "":
-		return LinkPlacer{}.Place(ctx, p)
+		return placeExclusive(root, p, rel)
 	case ChoiceKeep:
 		return c.keepBoth(root, p, rel)
 	case ChoiceReplace:

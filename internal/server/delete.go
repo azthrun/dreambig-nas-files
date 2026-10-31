@@ -69,7 +69,7 @@ func (s *server) deleteItems(w http.ResponseWriter, r *http.Request) {
 			s.refuse(w, r, "delete", user, it.Path.String(), err, false)
 			return
 		}
-		s.audit.Record(audit.Event{User: user, Operation: "delete", Path: it.Path.String(), Outcome: audit.OK, Status: http.StatusSeeOther})
+		s.Audit.Record(audit.Event{User: user, Operation: "delete", Path: it.Path.String(), Outcome: audit.OK, Status: http.StatusSeeOther})
 	}
 	http.Redirect(w, r, folderHref(sel.Folder), http.StatusSeeOther)
 }

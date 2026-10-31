@@ -53,5 +53,5 @@ func (s *server) download(w http.ResponseWriter, r *http.Request, user string, p
 	if cw.status >= 400 {
 		ev.Outcome = audit.Refused
 	}
-	s.audit.Record(ev)
+	s.Audit.Record(ev)
 }

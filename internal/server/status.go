@@ -77,7 +77,7 @@ func (s *server) refuse(w http.ResponseWriter, r *http.Request, op, user, path s
 		s.errorPage(w, r, ref.Status, ref.Key)
 		return
 	}
-	s.audit.Record(ev)
+	s.Audit.Record(ev)
 	s.errorPage(w, r, ref.Status, ref.Key)
 }
 

@@ -73,7 +73,7 @@ func (s *server) withRefusals(mux *http.ServeMux) http.Handler {
 			ev.User = sess.User
 			r = r.WithContext(context.WithValue(r.Context(), ctxKey{}, sess))
 		}
-		s.audit.Record(ev)
+		s.Audit.Record(ev)
 		s.errorPage(w, r, answer.status, key)
 	})
 }
@@ -128,7 +128,7 @@ func (s *server) filesPost(w http.ResponseWriter, r *http.Request) {
 // refuseRoute audits and answers a /files request that no handler takes: a method or a
 // form operation that does not exist.
 func (s *server) refuseRoute(w http.ResponseWriter, r *http.Request, status int) {
-	s.audit.Record(audit.Event{User: sessionOf(r).User, Operation: "files", Path: requestedPath(r), Outcome: audit.Refused, Status: status})
+	s.Audit.Record(audit.Event{User: sessionOf(r).User, Operation: "files", Path: requestedPath(r), Outcome: audit.Refused, Status: status})
 	s.errorPage(w, r, status, "error.method")
 }
 
