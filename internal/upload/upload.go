@@ -199,6 +199,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, user string)
 	h.record(r.Method, rec.status, st, body.n)
 }
 
+// owned loads Upload id for the User of the request. To anyone else an Upload does not
+// exist. It also fills in the Path the audit line will name.
+func (h *Handler) owned(ctx context.Context, id string, st *reqState) (handler.Upload, handler.FileInfo, error) {
+	u, err := h.store.GetUpload(ctx, id)
+	if err != nil {
+		return nil, handler.FileInfo{}, errNoUpload
+	}
+	info, err := u.GetInfo(ctx)
+	if err != nil || info.MetaData[metaUser] != st.user {
+		st.denied = true
+		return nil, handler.FileInfo{}, errNoUpload
+	}
+	if p, err := resolver.Parse(info.MetaData[metaPath]); err == nil {
+		st.path = p.String()
+	}
+	return u, info, nil
+}
+
 // item serves HEAD, PATCH and DELETE of one Upload, for its creator only. To anyone else
 // an Upload does not exist.
 func (h *Handler) item(w http.ResponseWriter, r *http.Request, id string, st *reqState) {
@@ -215,19 +233,10 @@ func (h *Handler) item(w http.ResponseWriter, r *http.Request, id string, st *re
 		writeTusError(w, errMethod)
 		return
 	}
-	u, err := h.store.GetUpload(r.Context(), id)
+	_, _, err := h.owned(r.Context(), id, st)
 	if err != nil {
-		writeTusError(w, errNoUpload)
+		writeTusError(w, err)
 		return
-	}
-	info, err := u.GetInfo(r.Context())
-	if err != nil || info.MetaData[metaUser] != st.user {
-		st.denied = true
-		writeTusError(w, errNoUpload)
-		return
-	}
-	if p, err := resolver.Parse(info.MetaData[metaPath]); err == nil {
-		st.path = p.String()
 	}
 	if r.Method == http.MethodHead && h.isPending(id) {
 		// Its data is complete but it never landed. A client that saw "complete" would
@@ -268,19 +277,22 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request, id string, st 
 		return
 	}
 	ctx := r.Context()
-	u, err := h.store.GetUpload(ctx, id)
+	// One request at a time settles an Upload: two clicks must not place the file twice.
+	// A holder is never asked to let go (the no-op), the second request waits its turn and
+	// then finds the Upload gone.
+	lock, err := h.Keeper.locker.NewLock(id)
+	if err == nil {
+		err = lock.Lock(ctx, func() {})
+	}
 	if err != nil {
-		writeTusError(w, errNoUpload)
+		writeTusError(w, errInternal)
 		return
 	}
-	info, err := u.GetInfo(ctx)
-	if err != nil || info.MetaData[metaUser] != st.user {
-		st.denied = true
-		writeTusError(w, errNoUpload)
+	defer func() { _ = lock.Unlock() }()
+	u, info, err := h.owned(ctx, id, st)
+	if err != nil {
+		writeTusError(w, err)
 		return
-	}
-	if p, err := resolver.Parse(info.MetaData[metaPath]); err == nil {
-		st.path = p.String()
 	}
 	if !h.isPending(id) {
 		writeTusError(w, errNoUpload)
