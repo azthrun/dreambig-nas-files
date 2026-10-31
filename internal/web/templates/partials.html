@@ -1,0 +1,25 @@
+{{define "header"}}<!doctype html>
+<html lang="{{.Lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{{if .CSRF}}<meta name="csrf-token" content="{{.CSRF}}">
+{{end}}<title>{{.Title}} - {{t .Lang "app.name"}}</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="bar">
+<strong>{{t .Lang "app.name"}}</strong>
+<nav class="lang" aria-label="{{t .Lang "nav.language"}}">{{range .LangLinks}}{{if .Current}}<span aria-current="true" lang="{{.Code}}">{{t $.Lang (printf "lang.%s" .Code)}}</span>{{else}}<a href="{{.Href}}" lang="{{.Code}}" hreflang="{{.Code}}">{{t $.Lang (printf "lang.%s" .Code)}}</a>{{end}} {{end}}</nav>
+{{if .User}}<span class="who">{{t .Lang "root.signed_in_as" .User}}</span>
+<form method="post" action="/logout">
+<input type="hidden" name="csrf_token" value="{{.CSRF}}">
+<button type="submit">{{t .Lang "nav.sign_out"}}</button>
+</form>
+{{end}}</header>
+<main>
+{{end}}
+{{define "footer"}}</main>
+</body>
+</html>
+{{end}}
