@@ -15,11 +15,17 @@ import (
 	"time"
 
 	"github.com/azthrun/dreambig-nas-files/internal/access"
+	"github.com/azthrun/dreambig-nas-files/internal/audit"
+	"github.com/azthrun/dreambig-nas-files/internal/clock"
 	"github.com/azthrun/dreambig-nas-files/internal/config"
 	"github.com/azthrun/dreambig-nas-files/internal/identity"
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
 	"github.com/azthrun/dreambig-nas-files/internal/server"
+	"github.com/azthrun/dreambig-nas-files/internal/trash"
 )
+
+// trashPurgeInterval is how often the background purge looks for expired Trash.
+const trashPurgeInterval = time.Hour
 
 func main() {
 	healthcheck := flag.Bool("healthcheck", false, "probe /healthz on NAS_FILES_ADDR and exit 0 if it answers 200")
@@ -71,7 +77,17 @@ func run(cfg config.Config, log *slog.Logger) error {
 		return err
 	}
 
-	handler, err := server.New(server.Deps{Mounts: ms, Auth: auth, Access: acc, Audit: os.Stdout, Log: log})
+	tr, err := trash.New(trash.Config{
+		Mounts: ms, Clock: clock.Real{}, RetentionDays: cfg.TrashRetentionDays,
+		Audit: audit.New(os.Stdout, clock.Real{}), Log: log,
+	})
+	if err != nil {
+		return err
+	}
+	defer tr.Close()
+	go tr.Run(ctx, trashPurgeInterval) // stops when ctx is cancelled at shutdown
+
+	handler, err := server.New(server.Deps{Mounts: ms, Auth: auth, Access: acc, Trash: tr, Audit: os.Stdout, Log: log})
 	if err != nil {
 		return err
 	}

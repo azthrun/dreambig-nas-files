@@ -22,14 +22,16 @@
 {{end}}</tr></thead>
 <tbody>
 {{range .Entries}}<tr class="{{if .IsDir}}dir{{else}}file{{end}}">
-<td class="select"><input type="checkbox" name="names" value="{{.Name}}" aria-label="{{t $.Lang "browse.select"}}: {{.Name}}"></td>
+<td class="select"><input type="checkbox" name="names" value="{{.Name}}" aria-label="{{t $.Lang "browse.select_item" .Name}}"></td>
 <td class="name">{{if .Href}}<a href="{{.Href}}">{{.Name}}</a>{{else}}<span>{{.Name}}</span>{{end}}</td>
 <td class="size">{{.Size}}</td>
 <td class="modified"><time datetime="{{.ISO}}">{{.Modified}}</time></td>
 </tr>
 {{end}}</tbody>
 </table>
-<p class="actions"><button type="submit" name="op" value="zip">{{t $.Lang "browse.zip_selected"}}</button></p>
+<p class="actions"><button type="submit" name="op" value="zip">{{t $.Lang "browse.zip_selected"}}</button>
+{{if .CanDelete}}<button type="submit" name="op" value="delete">{{t $.Lang "browse.delete_selected"}}</button>
+{{end}}</p>
 </form>
 {{if gt .Pages 1}}<nav class="pager" aria-label="{{t $.Lang "browse.pages"}}">
 {{if .PrevHref}}<a href="{{.PrevHref}}" rel="prev">{{t $.Lang "browse.prev"}}</a>{{end}}

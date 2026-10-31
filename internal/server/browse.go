@@ -43,14 +43,17 @@ type browseView struct {
 	Columns  []columnView
 	Entries  []entryView
 	ReadOnly bool
-	Action   string // the selection form posts here (this folder)
-	ZipHref  string // GET: the whole folder as a zip
-	MkdirURL string // where the create-folder form posts; shown only when !ReadOnly
-	Empty    bool
-	Page     int
-	Pages    int
-	PrevHref string
-	NextHref string
+	// CanDelete shows the Delete button in the selection form: the User can write here.
+	// Zip (#8) is for readers too, so the form itself is always shown.
+	CanDelete bool
+	Action    string // the selection form posts here (this folder)
+	ZipHref   string // GET: the whole folder as a zip
+	MkdirURL  string // where the create-folder form posts; shown only when !ReadOnly
+	Empty     bool
+	Page      int
+	Pages     int
+	PrevHref  string
+	NextHref  string
 }
 
 // pathFromRequest extracts the Path from /files/<escaped Path>. Anything that is not
@@ -118,6 +121,7 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 		Page:     cur,
 		Pages:    pages,
 	}
+	v.CanDelete = !v.ReadOnly
 	for _, e := range shown {
 		ev := entryView{Name: e.Name, IsDir: e.IsDir, Modified: i18n.FormatTime(lang, e.ModTime), ISO: e.ModTime.UTC().Format("2006-01-02T15:04:05Z")}
 		if e.IsDir {

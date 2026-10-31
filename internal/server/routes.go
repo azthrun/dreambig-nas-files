@@ -59,7 +59,8 @@ func (s *server) filesRoute(w http.ResponseWriter, r *http.Request) {
 
 // filesPost dispatches POST /files/<Path> by the form field op. Later tickets add their
 // plain-form operations here. op=zip is the browse selection form's download button
-// (names= checkboxes of the folder in the URL); #10's delete shares that form.
+// (names= checkboxes of the folder in the URL); op=delete (confirm page) and
+// op=delete-confirm (the move to the Trash) share that form.
 func (s *server) filesPost(w http.ResponseWriter, r *http.Request) {
 	switch r.PostFormValue("op") {
 	case "mkdir":
@@ -71,6 +72,10 @@ func (s *server) filesPost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.zipSelection(w, r, sessionOf(r).User, p)
+	case "delete":
+		s.confirmDelete(w, r)
+	case "delete-confirm":
+		s.deleteItems(w, r)
 	default:
 		s.errorPage(w, r, http.StatusBadRequest, "error.method")
 	}
