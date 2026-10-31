@@ -78,4 +78,10 @@ var english = map[string]string{
 	"upload.failed":           "Upload failed",
 	"upload.no_space":         "Not enough free space on the NAS for this file",
 	"upload.finished":         "Finished",
+	"upload.choose_folder":    "Choose a folder",
+	"upload.drop_hint":        "You can also drop files and folders anywhere on this page. Empty folders are not created.",
+	"upload.summary":          "%d uploaded, %d failed.",
+	"upload.reload_hint":      "Reload the page to see the new files.",
+	"upload.empty_skipped":    "%d empty folders were not created.",
+	"upload.reading":          "Reading folders...",
 }

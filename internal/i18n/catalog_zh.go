@@ -79,4 +79,10 @@ var chinese = map[string]string{
 	"upload.failed":           "上传失败",
 	"upload.no_space":         "NAS 可用空间不足，无法上传此文件",
 	"upload.finished":         "已结束",
+	"upload.choose_folder":    "选择文件夹",
+	"upload.drop_hint":        "也可以把文件和文件夹拖放到本页面任意位置。空文件夹不会被创建。",
+	"upload.summary":          "已上传 %d 个，失败 %d 个。",
+	"upload.reload_hint":      "刷新页面即可看到新文件。",
+	"upload.empty_skipped":    "%d 个空文件夹未创建。",
+	"upload.reading":          "正在读取文件夹……",
 }

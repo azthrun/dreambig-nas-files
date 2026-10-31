@@ -319,8 +319,11 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request, id string, st 
 }
 
 // isConflict is true for the errors that mean "the Path is not free": the staged data is
-// kept so the User can decide.
+// kept so the User can decide (a file in the way of a parent folder is the exception).
 func isConflict(err error) bool {
+	if errors.As(err, new(parentConflict)) {
+		return false // no choice can put a folder where a file stands
+	}
 	return errors.Is(err, ErrConflict) || errors.Is(err, ErrConflictFolder)
 }
 
@@ -367,7 +370,9 @@ func (h *Handler) record(method string, status int, st *reqState, bytes int64) {
 
 // check validates a destination the client named and returns where it would land. It is
 // run at creation and again at completion: parse, name rules, resolve, Access, and the
-// Conflict and parent-folder checks. #13 relaxes the parent check for Folder Uploads.
+// Conflict and parent-folder checks. Missing parent folders are allowed (Folder Uploads
+// create them at completion) but every name to be created must pass the name rules.
+// A non-empty choice lets an existing file stand: the Placer applies it.
 func (h *Handler) check(user, raw, choice string) (resolver.Path, resolver.Location, error) {
 	p, err := resolver.Parse(raw)
 	if err != nil {
@@ -400,12 +405,8 @@ func (h *Handler) check(user, raw, choice string) (resolver.Path, resolver.Locat
 		}
 		return p, loc, nil // the Placer applies the choice
 	}
-	parent, err := h.Resolver.Resolve(p.Parent())
-	if err != nil {
+	if err := h.checkParents(p); err != nil {
 		return p, loc, err
-	}
-	if fi, err := parent.Stat(); err != nil || !fi.IsDir() {
-		return p, loc, resolver.ErrNotFound
 	}
 	return p, loc, nil
 }
@@ -471,6 +472,22 @@ func (h *Handler) complete(ctx context.Context, st *reqState, u handler.Upload, 
 		err = resolver.ErrNotFound // the Path now leads into another Mount
 	}
 	st.path = p.String()
+	if err != nil {
+		return err
+	}
+	created, err := makeParents(loc)
+	if err == nil && created {
+		// New folders exist now: judge the destination again by the Mount it really
+		// lives in, in case a link was swapped in while they were made.
+		var again resolver.Location
+		if again, err = h.Resolver.Resolve(p); err == nil {
+			err = h.Authorize(st.user, again)
+		}
+		if err == nil && (again.Mount.Name != loc.Mount.Name || again.Exists) {
+			err = resolver.ErrNotFound
+		}
+		loc = again
+	}
 	if err != nil {
 		return err
 	}
