@@ -34,10 +34,11 @@ type store struct {
 	mounts map[string]mounts.Mount // writable Mounts by name
 	order  []string                // names, for stable scans
 	log    *slog.Logger
+	keeper *Keeper // activity marks for expiry
 }
 
-func newStore(ms []mounts.Mount, log *slog.Logger) *store {
-	s := &store{mounts: map[string]mounts.Mount{}, log: log}
+func newStore(ms []mounts.Mount, log *slog.Logger, k *Keeper) *store {
+	s := &store{mounts: map[string]mounts.Mount{}, log: log, keeper: k}
 	for _, m := range ms {
 		if !m.ReadOnly {
 			s.mounts[m.Name] = m
@@ -89,6 +90,9 @@ func (s *store) NewUpload(ctx context.Context, info handler.FileInfo) (handler.U
 	if err != nil {
 		return nil, s.scrub(ctx, "staging: new upload", err)
 	}
+	if info, err := u.GetInfo(ctx); err == nil {
+		s.keeper.touch(fs.Path, info.ID)
+	}
 	return &stagedUpload{Upload: u, fs: fs, s: s}, nil
 }
 
@@ -137,6 +141,11 @@ func (u *stagedUpload) WriteChunk(ctx context.Context, offset int64, src io.Read
 	n, err := u.Upload.WriteChunk(ctx, offset, src)
 	if err != nil {
 		err = u.s.scrub(ctx, "staging: write", err)
+	}
+	if n > 0 {
+		if info, ierr := u.Upload.GetInfo(ctx); ierr == nil {
+			u.s.keeper.touch(u.fs.Path, info.ID)
+		}
 	}
 	return n, err
 }

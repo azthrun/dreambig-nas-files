@@ -26,7 +26,6 @@ import (
 	"strings"
 
 	"github.com/tus/tusd/v2/pkg/handler"
-	"github.com/tus/tusd/v2/pkg/memorylocker"
 	expslog "golang.org/x/exp/slog"
 
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
@@ -70,6 +69,8 @@ type Config struct {
 	Audit *audit.Logger
 	// Log receives operational errors; nil discards them.
 	Log *slog.Logger
+	// Keeper applies the free-space reserve and expiry; nil means neither.
+	Keeper *Keeper
 	// Place completes an Upload; nil means LinkPlacer (refuse an existing Path).
 	Place Placer
 }
@@ -90,12 +91,17 @@ func New(cfg Config) (*Handler, error) {
 	if cfg.Place == nil {
 		cfg.Place = LinkPlacer{}
 	}
-	h := &Handler{Config: cfg, store: newStore(cfg.Mounts, cfg.Log)}
+	if cfg.Keeper == nil {
+		cfg.Keeper = NewKeeper(KeeperConfig{Mounts: cfg.Mounts, Audit: cfg.Audit, Log: cfg.Log})
+	}
+	h := &Handler{Config: cfg, store: newStore(cfg.Mounts, cfg.Log, cfg.Keeper)}
 
 	composer := handler.NewStoreComposer()
 	composer.UseCore(h.store)
 	composer.UseTerminater(h.store)
-	composer.UseLocker(memorylocker.New())
+	// Not memorylocker: it makes every contender cut off the holder, so an expiry probe
+	// would interrupt an Upload being written. The Keeper's locker adds tryLock.
+	composer.UseLocker(cfg.Keeper.locker)
 
 	tus, err := handler.NewUnroutedHandler(handler.Config{
 		StoreComposer:        composer,
@@ -204,6 +210,8 @@ func (h *Handler) item(w http.ResponseWriter, r *http.Request, id string, st *re
 func (h *Handler) record(method string, status int, st *reqState, bytes int64) {
 	ev := audit.Event{User: st.user, Path: st.path, Status: status}
 	switch {
+	case status == http.StatusInsufficientStorage:
+		ev.Outcome = audit.Refused // the reserve said no; nothing broke
 	case status >= 500:
 		ev.Outcome = audit.Failed
 	case status >= 400:
@@ -277,6 +285,11 @@ func (h *Handler) preCreate(ev handler.HookEvent) (handler.HTTPResponse, handler
 		st.path = p.String()
 	}
 	if err != nil {
+		return handler.HTTPResponse{}, handler.FileInfoChanges{}, h.tusError(ev.Context, err)
+	}
+	// Only a new Upload is judged against the free-space reserve (a deferred length
+	// counts as 0); Uploads under way are never refused.
+	if err := h.Keeper.admit(loc.Mount, ev.Upload.Size); err != nil {
 		return handler.HTTPResponse{}, handler.FileInfoChanges{}, h.tusError(ev.Context, err)
 	}
 	return handler.HTTPResponse{}, handler.FileInfoChanges{MetaData: handler.MetaData{
