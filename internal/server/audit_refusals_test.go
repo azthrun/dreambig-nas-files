@@ -110,3 +110,54 @@ func TestAnUnknownFormOperationAndAWrongMethodAreAudited(t *testing.T) {
 		t.Fatalf("want a 400 and a 405 line for /files, got %v", ls)
 	}
 }
+
+// An Upload request refused for its session or CSRF token names the Path where the
+// request carries one (tus metadata on creation, the form field on a skip report), and
+// the response never echoes it.
+func TestUploadSessionAndCSRFRefusalsNameThePathWithoutEchoingIt(t *testing.T) {
+	e := testenv.New(t, testenv.Mount("docs"))
+	create := func(c *testenv.Client, csrf bool) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/uploads/", nil)
+		r.Header.Set("Tus-Resumable", "1.0.0")
+		r.Header.Set("Upload-Length", "3")
+		r.Header.Set("Upload-Metadata", tusMeta(map[string]string{"path": "docs/new.txt"}))
+		if csrf {
+			r.Header.Set("X-CSRF-Token", c.CSRF)
+		}
+		return c.Do(r)
+	}
+	skipForm := func(c *testenv.Client, csrf bool) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/uploads/skip", strings.NewReader(url.Values{"path": {"docs/skipped.txt"}}.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if csrf {
+			r.Header.Set("X-CSRF-Token", c.CSRF)
+		}
+		return c.Do(r)
+	}
+	signedIn := e.SignIn(testenv.DefaultUser)
+	var recs []*httptest.ResponseRecorder
+	recs = append(recs, create(e.Anonymous(), false), skipForm(e.Anonymous(), false),
+		create(signedIn, false), skipForm(signedIn, false))
+	// An id-only request names no Path: nothing to report.
+	idOnly := httptest.NewRequest(http.MethodPatch, "/uploads/0123456789abcdef0123456789abcdef", nil)
+	e.Anonymous().Do(idOnly)
+
+	for _, rec := range recs {
+		if b := rec.Body.String(); strings.Contains(b, "new.txt") || strings.Contains(b, "skipped.txt") {
+			t.Errorf("a refusal echoes the Path: %q", b)
+		}
+	}
+	paths := func(op string) (out []string) {
+		for _, l := range refusalsOf(t, e, op) {
+			p, _ := l["path"].(string)
+			out = append(out, p)
+		}
+		return out
+	}
+	if got := strings.Join(paths("session"), ","); got != "docs/new.txt,docs/skipped.txt," {
+		t.Errorf("session refusals name %q", got)
+	}
+	if got := strings.Join(paths("csrf"), ","); got != "docs/new.txt,docs/skipped.txt" {
+		t.Errorf("CSRF refusals name %q", got)
+	}
+}
