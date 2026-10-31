@@ -62,6 +62,7 @@ var english = map[string]string{
 	"upload.apply_all":        "Apply to all remaining conflicts",
 	"upload.skipped":          "Skipped",
 	"upload.folder_exists":    "A folder with this name exists, so the file was not uploaded",
+	"upload.parent_exists":    "A file stands where a folder is needed, so the file was not uploaded",
 	"upload.title":            "Upload files",
 	"upload.choose":           "Choose files",
 	"upload.start":            "Upload",

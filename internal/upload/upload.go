@@ -58,6 +58,8 @@ var idRe = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 var (
 	errConflict = handler.NewError("ERR_CONFLICT", "a file already exists at that Path", http.StatusConflict)
+	// errConflictParent: a file stands where a parent folder is needed; no choice settles it.
+	errConflictParent = handler.NewError("ERR_CONFLICT_PARENT", "a file stands where a folder is needed", http.StatusConflict)
 	// errConflictFolder: a folder is at the Path; only skip is possible.
 	errConflictFolder = handler.NewError("ERR_CONFLICT_FOLDER", "a folder is at that Path", http.StatusConflict)
 	// errConflictTrashed: a late Conflict during replace; the old file is in the Trash.
@@ -553,6 +555,8 @@ func (h *Handler) tusError(ctx context.Context, err error) error {
 	switch {
 	case errors.As(err, &kept):
 		return errConflictTrashed
+	case errors.As(err, new(parentConflict)):
+		return errConflictParent
 	case errors.Is(err, ErrConflictFolder):
 		return errConflictFolder
 	case errors.Is(err, ErrConflict):

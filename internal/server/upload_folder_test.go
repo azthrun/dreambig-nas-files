@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -105,6 +106,26 @@ func TestFolderUploadConflictsWithAFileStandingWhereAFolderIsNeeded(t *testing.T
 	}
 	if rec := tusCreate(c, "docs/sub/file2/x/y.txt", 1); rec.Code != http.StatusCreated {
 		t.Errorf("create = %d", rec.Code)
+	}
+}
+
+// No choice can put a folder where a file stands, so the code must tell the page not to
+// offer one.
+func TestAFileWhereAFolderIsNeededIsNotAConflictTheUserCanSettle(t *testing.T) {
+	e := upEnv(t)
+	e.WriteFile("docs/file.txt", "x")
+	c := e.SignIn("alice")
+	rec := tusCreate(c, "docs/file.txt/new.txt", 3)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "ERR_CONFLICT_PARENT") {
+		t.Fatalf("create = %d %q", rec.Code, rec.Body)
+	}
+
+	// And when the file appears while the data is in flight.
+	loc := uploadURL(t, tusCreate(c, "docs/later/new.txt", 3))
+	e.WriteFile("docs/later", "x")
+	rec = tusPatch(c, loc, 0, "abc")
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "ERR_CONFLICT_PARENT") {
+		t.Fatalf("late = %d %q", rec.Code, rec.Body)
 	}
 }
 

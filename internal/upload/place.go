@@ -93,7 +93,7 @@ func linkExclusive(root *os.Root, staged, rel string) error {
 		case errors.Is(err, fs.ErrExist):
 			return errTaken
 		case errors.Is(err, syscall.ENOTDIR):
-			return ErrConflict // a file stands where a parent folder should be
+			return errParentConflict
 		case errors.Is(err, fs.ErrNotExist):
 			return resolver.ErrNotFound // the parent folder vanished
 		}

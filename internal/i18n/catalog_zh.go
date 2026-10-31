@@ -63,6 +63,7 @@ var chinese = map[string]string{
 	"upload.apply_all":        "对其余冲突全部应用",
 	"upload.skipped":          "已跳过",
 	"upload.folder_exists":    "存在同名文件夹，因此未上传该文件",
+	"upload.parent_exists":    "此处需要文件夹，但已有同名文件，因此未上传",
 	"upload.title":            "上传文件",
 	"upload.choose":           "选择文件",
 	"upload.start":            "上传",

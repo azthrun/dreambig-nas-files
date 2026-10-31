@@ -66,6 +66,12 @@
       n === ".nas-files-staging" || n === ".nas-files-trash" || n === ".nas-mcp-trash";
   }
 
+  // .DS_Store is the Mac's own bookkeeping, in every folder a Mac has shown: the User did
+  // not pick it, so dropping it is not a failure to report.
+  function isOSNoise(rel) {
+    return rel.split("/").pop().toLowerCase() === ".ds_store";
+  }
+
   function hiddenPath(rel) {
     var segs = rel.split("/");
     for (var i = 0; i < segs.length; i++) { if (isHidden(segs[i])) { return true; } }
@@ -134,7 +140,8 @@
   // Conflicts. A Path that already holds a file is met in two places: at creation (POST,
   // 409) and, if the file appeared while the data was in flight, when the last byte
   // arrives (PATCH, 409; the server keeps the data until we call resolve). A folder at
-  // the Path (ERR_CONFLICT_FOLDER) allows no choice but skip.
+  // the Path (ERR_CONFLICT_FOLDER) allows no choice but skip, and a file where a folder is
+  // needed (ERR_CONFLICT_PARENT) allows none at all: the file fails, the rest go on.
   function conflictBody(err) {
     var res = err && err.originalResponse;
     return res && res.getBody ? String(res.getBody()) : "";
@@ -176,6 +183,16 @@
     showNextAsk();
   }
 
+  // Apply-to-all also answers the questions already waiting behind the dialog, once each.
+  function answerQueued(choice) {
+    askQueue.slice().forEach(function (q) {
+      if (!q.autoTried) {
+        q.autoTried = true;
+        q.answer(choice);
+      }
+    });
+  }
+
   function chooseConflict(it, text, onChoice) {
     // Apply-to-all answers by itself, but only once per file, so a choice that keeps
     // failing falls back to asking.
@@ -187,10 +204,16 @@
     setState(it, "asking", msg("conflict_wait"));
     it.cancel.hidden = false;
     it.askText = text;
-    it.onChoice = function (choice) {
-      if (askAll.checked) { allChoice = choice; }
+    it.answer = function (choice) {
       dropAsk(it);
       onChoice(choice);
+    };
+    it.onChoice = function (choice) {
+      if (askAll.checked) {
+        allChoice = choice;
+        answerQueued(choice);
+      }
+      it.answer(choice);
     };
     askQueue.push(it);
     showNextAsk();
@@ -224,6 +247,10 @@
     if (code !== 409) {
       var f = failureText({ originalResponse: { getStatus: function () { return code; } } });
       settle(it, f[0], f[1]);
+      return;
+    }
+    if (body.indexOf("ERR_CONFLICT_PARENT") >= 0) { // nothing is kept on the server for it
+      settle(it, "exists", msg("parent_exists"));
       return;
     }
     if (body.indexOf("ERR_CONFLICT_FOLDER") >= 0) {
@@ -338,6 +365,7 @@
   // add queues one file at its relative path ("name" or "Folder/sub/name").
   function add(file, rel, error) {
     rel = nfc(rel);
+    if (isOSNoise(rel)) { return null; }
     var it = { file: file, rel: rel, row: null, bar: null, text: null, cancel: null, upload: null, sent: 0, state: "waiting", settled: false };
     items.push(it);
     if (error) {
