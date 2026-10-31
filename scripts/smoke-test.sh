@@ -36,7 +36,11 @@ cleanup() {
   fi
   docker rm -f "$name" >/dev/null 2>&1 || true
   docker rm -f "$name-empty" "$name-bad" >/dev/null 2>&1 || true
-  rm -rf "$work"
+  # The container wrote into docs as its own UID, so clear docs as root first.
+  docker run --rm -v "$rw:/target" httpd:2.4-alpine \
+    find /target -mindepth 1 -delete >/dev/null 2>&1 || true
+  rm -rf "$work" || true
+  exit "$status"
 }
 trap cleanup EXIT
 
