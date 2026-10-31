@@ -23,9 +23,6 @@ func TestNewNameRules(t *testing.T) {
 			t.Errorf("ValidateName(%q) = %v, want ErrInvalidName", name, err)
 		}
 	}
-	if got := resolver.Status(resolver.ErrInvalidName); got != 400 {
-		t.Errorf("Status(ErrInvalidName) = %d, want 400", got)
-	}
 	good := []string{"notes", "tax 2025", ".config", "a.b.c", "COM10", "console", "中文", strings.Repeat("a", 255)}
 	for _, name := range good {
 		if _, err := resolver.ValidateName(name); err != nil {

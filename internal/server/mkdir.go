@@ -27,7 +27,7 @@ func (s *server) mkdir(w http.ResponseWriter, r *http.Request) {
 	target := resolver.Path{} // what the audit line names: the new folder if it can be formed
 
 	fail := func(err error) {
-		s.refuseCreate(w, r, user, target, err)
+		s.refuse(w, r, "mkdir", user, target.String(), err, true)
 	}
 	parent, err := pathFromRequest(r)
 	if err != nil {
@@ -106,32 +106,4 @@ func (s *server) clashes(dir resolver.Location, name string) bool {
 		}
 	}
 	return false
-}
-
-func (s *server) refuseCreate(w http.ResponseWriter, r *http.Request, user string, p resolver.Path, err error) {
-	status, key := statusOf(err), "error.not_found"
-	switch {
-	case errors.Is(err, errExists):
-		status, key = http.StatusConflict, "error.exists"
-	case errors.Is(err, errForbidden):
-		key = "error.no_write"
-	case errors.Is(err, resolver.ErrInvalidName):
-		key = "error.bad_name"
-	case status == http.StatusBadRequest:
-		key = "error.bad_path"
-	case status == http.StatusInternalServerError:
-		s.Log.Error("mkdir", "err", err)
-		s.errorPage(w, r, status, "error.internal")
-		return
-	}
-	if status == http.StatusNotFound { // routine misses are not audited, like browse
-		s.errorPage(w, r, status, key)
-		return
-	}
-	ev := audit.Event{User: user, Operation: "mkdir", Outcome: audit.Refused, Status: status}
-	if !errors.Is(err, resolver.ErrInvalidPath) || errors.Is(err, resolver.ErrInvalidName) {
-		ev.Path = p.String() // only a syntactically valid Path is ever recorded
-	}
-	s.audit.Record(ev)
-	s.errorPage(w, r, status, key)
 }

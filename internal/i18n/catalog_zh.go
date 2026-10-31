@@ -53,7 +53,6 @@ var chinese = map[string]string{
 	"delete.note":             "它们会留在垃圾桶中直到被清理，可通过 File Station 恢复。",
 	"delete.confirm":          "移到垃圾桶",
 	"delete.cancel":           "取消",
-	"error.read_only":         "此处不允许修改。",
 	"upload.conflict_prompt":  "已存在。要怎么处理？",
 	"upload.conflict_trashed": "在上传期间出现了同名文件；被替换的文件已在垃圾桶中。要如何处理这个新上传？",
 	"upload.conflict_wait":    "等待你的选择",

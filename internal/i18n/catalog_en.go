@@ -52,7 +52,6 @@ var english = map[string]string{
 	"delete.note":             "They stay in the Trash until it is purged, and can be recovered with File Station.",
 	"delete.confirm":          "Move to Trash",
 	"delete.cancel":           "Cancel",
-	"error.read_only":         "Changes are not allowed here.",
 	"upload.conflict_prompt":  "already exists here. What should happen?",
 	"upload.conflict_trashed": "appeared while uploading; the file it replaced is in the Trash. What should happen to the new upload?",
 	"upload.conflict_wait":    "Waiting for your choice",

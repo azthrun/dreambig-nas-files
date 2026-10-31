@@ -2,7 +2,6 @@ package server
 
 import (
 	"errors"
-	"io/fs"
 	"net/http"
 	"slices"
 
@@ -12,7 +11,6 @@ import (
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
 	"github.com/azthrun/dreambig-nas-files/internal/resolver"
-	"github.com/azthrun/dreambig-nas-files/internal/trash"
 )
 
 // Delete is two steps of the browse selection form (POST /files/<folder>, see
@@ -47,7 +45,7 @@ func (s *server) confirmDelete(w http.ResponseWriter, r *http.Request) {
 	user := sessionOf(r).User
 	sel, auditPath, err := s.selected(r, user)
 	if err != nil {
-		s.refuseDelete(w, r, user, auditPath, err)
+		s.refuse(w, r, "delete", user, auditPath, err, false)
 		return
 	}
 	v := &confirmView{Back: folderHref(sel.Folder)}
@@ -63,13 +61,12 @@ func (s *server) deleteItems(w http.ResponseWriter, r *http.Request) {
 	user := sessionOf(r).User
 	sel, auditPath, err := s.selected(r, user)
 	if err != nil {
-		s.refuseDelete(w, r, user, auditPath, err)
+		s.refuse(w, r, "delete", user, auditPath, err, false)
 		return
 	}
 	for _, it := range sel.Items {
 		if _, err := s.Trash.Place(it.loc.Mount.Name, it.loc.Rel()); err != nil {
-			s.audit.Record(audit.Event{User: user, Operation: "delete", Path: it.Path.String(), Outcome: audit.Failed, Status: statusOfDelete(err)})
-			s.refuseDelete(w, r, user, it.Path.String(), err)
+			s.refuse(w, r, "delete", user, it.Path.String(), err, false)
 			return
 		}
 		s.audit.Record(audit.Event{User: user, Operation: "delete", Path: it.Path.String(), Outcome: audit.OK, Status: http.StatusSeeOther})
@@ -162,45 +159,4 @@ func diskNames(loc resolver.Location) (map[string]string, error) {
 		}
 	}
 	return out, nil
-}
-
-// statusOfDelete maps every error of the delete flow to its HTTP status.
-func statusOfDelete(err error) int {
-	switch {
-	case errors.Is(err, errNothingSelected):
-		return http.StatusBadRequest
-	case errors.Is(err, trash.ErrReadOnly):
-		return http.StatusForbidden
-	case errors.Is(err, trash.ErrInvalid):
-		return http.StatusBadRequest
-	case errors.Is(err, trash.ErrNotFound), errors.Is(err, fs.ErrNotExist):
-		return http.StatusNotFound
-	}
-	return statusOf(err)
-}
-
-// refuseDelete audits and answers a delete (or its confirmation) that was refused.
-func (s *server) refuseDelete(w http.ResponseWriter, r *http.Request, user, auditPath string, err error) {
-	status := statusOfDelete(err)
-	if status == http.StatusInternalServerError {
-		s.Log.Error("delete", "err", err)
-		s.errorPage(w, r, status, "error.internal")
-		return
-	}
-	ev := audit.Event{User: user, Operation: "delete", Outcome: audit.Refused, Status: status}
-	if !errors.Is(err, resolver.ErrInvalidPath) {
-		ev.Path = auditPath // only a syntactically valid Path is ever recorded
-	}
-	s.audit.Record(ev)
-	key := "error.not_found"
-	switch status {
-	case http.StatusBadRequest:
-		key = "error.bad_path"
-		if errors.Is(err, errNothingSelected) {
-			key = "error.no_selection"
-		}
-	case http.StatusForbidden:
-		key = "error.read_only"
-	}
-	s.errorPage(w, r, status, key)
 }
