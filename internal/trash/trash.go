@@ -39,6 +39,9 @@ type Config struct {
 	Audit *audit.Logger
 	// Log receives operational logs; nil discards them.
 	Log *slog.Logger
+	// RemoveAll deletes a purged folder inside a Mount's os.Root; nil means
+	// root.RemoveAll. Tests substitute a slow one.
+	RemoveAll func(root *os.Root, rel string) error
 }
 
 // Trash places content in the Trash and purges it. Safe for concurrent use.
@@ -53,6 +56,9 @@ type Trash struct {
 
 // New opens a Trash over the Mounts. Close it when done.
 func New(cfg Config) (*Trash, error) {
+	if cfg.RemoveAll == nil {
+		cfg.RemoveAll = func(root *os.Root, rel string) error { return root.RemoveAll(rel) }
+	}
 	t := &Trash{cfg: cfg, roots: map[string]*os.Root{}, readOnly: map[string]bool{}}
 	for _, m := range cfg.Mounts {
 		root, err := os.OpenRoot(m.Path)
