@@ -87,6 +87,8 @@ func linkExclusive(root *os.Root, staged, rel string) error {
 			return errParentConflict
 		case errors.Is(err, fs.ErrNotExist):
 			return resolver.ErrNotFound // the parent folder vanished
+		case errors.Is(err, syscall.ENAMETOOLONG):
+			return resolver.ErrTooLong // keep both's number can carry a name past NAME_MAX
 		}
 		return fmt.Errorf("link into place: %w", scrub.Path(err))
 	}

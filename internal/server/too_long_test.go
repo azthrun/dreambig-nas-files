@@ -155,3 +155,25 @@ func TestKeepBothCannotPlaceAFilePastTheSystemPathLimit(t *testing.T) {
 		t.Error("staged data left behind")
 	}
 }
+
+// The same for the limit on one name: the number carries it past NAME_MAX.
+func TestKeepBothCannotPlaceAFilePastTheSystemNameLimit(t *testing.T) {
+	e := upEnv(t)
+	c := e.SignIn("alice")
+	stem := strings.Repeat("f", 251)
+	path := "docs/" + stem + ".txt"
+
+	if rec := uploadWith(t, c, path, "", "abc"); rec.Code != http.StatusNoContent {
+		t.Fatalf("upload at the limit = %d %q", rec.Code, rec.Body)
+	}
+	rec := uploadWith(t, c, path, "keep", "xyz")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "ERR_INVALID_PATH") {
+		t.Errorf("keep both = %d %q, want a bad name", rec.Code, rec.Body)
+	}
+	if !stagingEmpty(e, "docs") {
+		t.Error("staged data left behind")
+	}
+	if ls := refusalsOf(t, e, "upload"); len(ls) != 1 {
+		t.Errorf("want the refusal audited, got %v", ls)
+	}
+}
