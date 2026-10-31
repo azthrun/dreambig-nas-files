@@ -212,9 +212,10 @@ func TryNew(t testing.TB, opts ...Option) (*Env, error) {
 	if s.trashDays != nil {
 		days = *s.trashDays
 	}
+	auditLog := audit.New(e.Audit, e.Clock) // one Logger, as in production
 	tr, err := trash.New(trash.Config{
 		Mounts: e.Mounts, Clock: e.Clock, RetentionDays: days,
-		Audit: audit.New(e.Audit, e.Clock),
+		Audit: auditLog,
 	})
 	if err != nil {
 		return nil, err
@@ -227,13 +228,13 @@ func TryNew(t testing.TB, opts ...Option) (*Env, error) {
 	}
 	kc := upload.KeeperConfig{
 		Mounts: e.Mounts, Clock: e.Clock, Expiry: expiry, Reserve: s.reserve,
-		Audit: audit.New(e.Audit, e.Clock),
+		Audit: auditLog,
 	}
 	if s.freeSpace != nil {
 		kc.FreeSpace = func(m mounts.Mount) (int64, error) { return s.freeSpace(m.Name), nil }
 	}
 	e.Uploads = upload.NewKeeper(kc)
-	h, err := server.New(server.Deps{Mounts: e.Mounts, Clock: e.Clock, Audit: e.Audit, Auth: auth, Access: acc, Trash: tr, Uploads: e.Uploads})
+	h, err := server.New(server.Deps{Mounts: e.Mounts, Clock: e.Clock, Audit: auditLog, Auth: auth, Access: acc, Trash: tr, Uploads: e.Uploads})
 	if err != nil {
 		return nil, err
 	}
