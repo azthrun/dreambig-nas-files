@@ -147,6 +147,17 @@
 
   function skipped(it) { settle(it, "skipped", msg("skipped")); }
 
+  // reportSkip tells the server a file is not being sent, because no Upload exists yet to
+  // carry the choice. The file is skipped whether or not the report arrives.
+  function reportSkip(it) {
+    return fetch(endpoint + "skip", {
+      method: "POST",
+      headers: { "X-CSRF-Token": token, "Content-Type": "application/x-www-form-urlencoded" },
+      credentials: "same-origin",
+      body: "path=" + encodeURIComponent(dest + "/" + it.rel)
+    }).then(function () {}, function () {});
+  }
+
   // The dialog is shared by up to MAX_PARALLEL Uploads: one question at a time.
   function showNextAsk() {
     if (asking || askQueue.length === 0) { return; }
@@ -185,9 +196,11 @@
     showNextAsk();
   }
 
+  // The server hears every choice, so the audit log shows it: a late one by resolve
+  // (skip discards the kept data there), one made before any data was sent by /skip.
   function resolveLate(it, choice) {
-    if (choice === "skip") { it.upload.abort(true); skipped(it); return; }
-    setState(it, "running", msg("uploading"));
+    var skip = choice === "skip";
+    setState(it, "running", msg(skip ? "waiting" : "uploading"));
     fetch(it.upload.url + "/resolve?choice=" + encodeURIComponent(choice), {
       method: "POST",
       headers: { "X-CSRF-Token": token, "Tus-Resumable": "1.0.0" },
@@ -195,6 +208,7 @@
     }).then(function (res) {
       if (it.state === "cancelled") { return null; }
       if (res.status === 204) {
+        if (skip) { skipped(it); return null; }
         if (it.bar) { it.bar.value = 100; }
         settle(it, "done", msg("done"));
         return null;
@@ -220,7 +234,7 @@
     var text = body.indexOf("ERR_CONFLICT_TRASHED") >= 0 ? msg("conflict_trashed") : msg("conflict_prompt");
     chooseConflict(it, text, function (choice) {
       if (late) { resolveLate(it, choice); }
-      else if (choice === "skip") { skipped(it); }
+      else if (choice === "skip") { reportSkip(it).then(function () { skipped(it); }); }
       else { run(it, choice); }
     });
   }

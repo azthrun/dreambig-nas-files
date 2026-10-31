@@ -53,8 +53,9 @@ func (e replacedKept) Error() string {
 }
 func (e replacedKept) Is(target error) bool { return target == ErrConflict }
 
-// Conflict choices carried in Upload metadata. Skip is the User's alone: the browser just
-// does not upload, so it is never sent at creation; the resolve step accepts it.
+// Conflict choices. Keep and replace are carried in Upload metadata. Skip never is: a
+// skipped file is not uploaded, so it is only reported (see the package doc) and accepted
+// by the resolve step.
 const (
 	ChoiceKeep    = "keep"
 	ChoiceReplace = "replace"
