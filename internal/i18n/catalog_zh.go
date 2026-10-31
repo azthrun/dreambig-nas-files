@@ -77,5 +77,6 @@ var chinese = map[string]string{
 	"upload.refused":          "此处不允许上传",
 	"upload.bad_name":         "不能使用此名称",
 	"upload.failed":           "上传失败",
+	"upload.no_space":         "NAS 可用空间不足，无法上传此文件",
 	"upload.finished":         "已结束",
 }

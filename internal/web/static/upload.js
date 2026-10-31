@@ -56,6 +56,7 @@
   function failureText(err) {
     var res = err && err.originalResponse;
     var code = res ? res.getStatus() : 0;
+    if (code === 507) { return ["failed", msg("no_space")]; } // ERR_INSUFFICIENT_SPACE: free-space reserve
     if (code === 409) { return ["exists", msg("exists")]; }
     if (code === 403 || code === 404) { return ["failed", msg("refused")]; }
     if (code === 400) { return ["failed", msg("bad_name")]; }
@@ -173,10 +174,11 @@
       retryDelays: [0, 1000, 3000, 5000, 10000],
       headers: { "X-CSRF-Token": token },
       metadata: md,
-      // A Conflict is for the User to settle, not to retry (tus-js-client retries 409).
+      // A Conflict is for the User to settle, and a 507 (no room) is an answer, not an
+      // outage: neither is retried (tus-js-client retries 409), both show at once.
       onShouldRetry: function (err, retryAttempt, options) {
         var res = err && err.originalResponse;
-        if (res && res.getStatus() === 409) { return false; }
+        if (res && (res.getStatus() === 507 || res.getStatus() === 409)) { return false; }
         return tus.defaultOptions.onShouldRetry(err, retryAttempt, options);
       },
       onError: function (err) {

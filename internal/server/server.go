@@ -35,6 +35,9 @@ type Deps struct {
 	// Trash puts deleted content in each Mount's Trash. Required. main starts its purge
 	// loop; the server only places content.
 	Trash *trash.Trash
+	// Uploads applies the Upload limits (free-space reserve, expiry). Optional: without
+	// one, new Uploads are never refused for space and nothing expires. main runs its sweep.
+	Uploads *upload.Keeper
 	// Audit receives one JSON line per auditable event (stdout in production).
 	Audit io.Writer
 	// Log receives operational logs (stderr in production); defaults to discarding.
@@ -93,7 +96,7 @@ func New(d Deps) (http.Handler, error) {
 		tmpl:     tmpl,
 	}
 	up, err := upload.New(upload.Config{
-		Mounts: d.Mounts, Resolver: res, Trash: d.Trash, Audit: s.audit, Log: d.Log, StatusOf: statusOf,
+		Mounts: d.Mounts, Resolver: res, Trash: d.Trash, Audit: s.audit, Log: d.Log, StatusOf: statusOf, Keeper: d.Uploads,
 		Authorize: func(user string, loc resolver.Location) error { return s.authorize(user, loc, access.Write) },
 	})
 	if err != nil {

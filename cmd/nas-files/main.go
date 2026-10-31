@@ -22,10 +22,14 @@ import (
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
 	"github.com/azthrun/dreambig-nas-files/internal/server"
 	"github.com/azthrun/dreambig-nas-files/internal/trash"
+	"github.com/azthrun/dreambig-nas-files/internal/upload"
 )
 
 // trashPurgeInterval is how often the background purge looks for expired Trash.
 const trashPurgeInterval = time.Hour
+
+// uploadSweepInterval is how often abandoned Uploads are looked for.
+const uploadSweepInterval = time.Hour
 
 func main() {
 	healthcheck := flag.Bool("healthcheck", false, "probe /healthz on NAS_FILES_ADDR and exit 0 if it answers 200")
@@ -87,7 +91,13 @@ func run(cfg config.Config, log *slog.Logger) error {
 	defer tr.Close()
 	go tr.Run(ctx, trashPurgeInterval) // stops when ctx is cancelled at shutdown
 
-	handler, err := server.New(server.Deps{Mounts: ms, Auth: auth, Access: acc, Trash: tr, Audit: os.Stdout, Log: log})
+	keeper := upload.NewKeeper(upload.KeeperConfig{
+		Mounts: ms, Clock: clock.Real{}, Expiry: time.Duration(cfg.UploadExpiryDays) * 24 * time.Hour,
+		Reserve: cfg.FreeSpaceReserveBytes, Audit: audit.New(os.Stdout, clock.Real{}), Log: log,
+	})
+	go keeper.Run(ctx, uploadSweepInterval) // sweeps now (Uploads from earlier runs too); stops with ctx
+
+	handler, err := server.New(server.Deps{Mounts: ms, Auth: auth, Access: acc, Trash: tr, Uploads: keeper, Audit: os.Stdout, Log: log})
 	if err != nil {
 		return err
 	}
