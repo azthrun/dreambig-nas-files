@@ -94,3 +94,27 @@ func TestSkipNeedsASessionAndACSRFToken(t *testing.T) {
 		t.Errorf("GET skip = %d, want 405", rec.Code)
 	}
 }
+
+// A Mount the User has no Access to must not be told apart from one that does not exist,
+// even through the skip report; the refusal is still audited with its Path.
+func TestSkipInAMountWithoutAccessLooksLikeAMissingMountAndIsAudited(t *testing.T) {
+	e := upEnv(t)
+	bob := e.SignIn("bob") // no Access to "other"
+
+	got, want := skip(bob, "other/x.txt"), skip(bob, "nowhere/x.txt")
+	if got.Code != http.StatusNotFound || got.Code != want.Code || got.Body.String() != want.Body.String() {
+		t.Fatalf("no-Access skip = %d %q, a missing Mount = %d %q", got.Code, got.Body, want.Code, want.Body)
+	}
+	var seen bool
+	for _, l := range auditLines(t, e) {
+		if l["operation"] == "upload_skip" && l["path"] == "other/x.txt" {
+			seen = true
+			if l["outcome"] != "refused" || l["user"] != "bob" || l["status"] != float64(404) {
+				t.Errorf("audit line = %v", l)
+			}
+		}
+	}
+	if !seen {
+		t.Error("the no-Access skip was not audited")
+	}
+}

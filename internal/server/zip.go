@@ -20,8 +20,8 @@ func (s *server) zipFolder(w http.ResponseWriter, r *http.Request, user string, 
 	s.streamZip(w, r, user, p, p.Name(), []download.Item{{Name: p.Name(), Path: p, Loc: loc}})
 }
 
-// zipSelection handles the browse form's "zip" action:
-// POST /files/<folder> with action=zip and one names=<entry> per ticked row. Read Access
+// zipSelection handles the browse form's "zip" operation:
+// POST /files/<folder> with op=zip and one names=<entry> per ticked row. Read Access
 // is enough: a download is not a write. Every name goes through the Path resolver and
 // authorize like any other request; names that are hidden, missing or out of reach are
 // dropped as if they were not there.

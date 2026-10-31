@@ -26,9 +26,6 @@ const purgingSuffix = ".purging"
 // expired folders aside (a rename); the removal runs without it and deletes are not held
 // up. A set-aside folder is no longer a dated one, so nothing is placed into it.
 func (t *Trash) Purge() {
-	if t.cfg.RetentionDays <= 0 {
-		return
-	}
 	for _, a := range t.setAside() {
 		outcome := audit.OK
 		if err := t.cfg.RemoveAll(a.root, a.aside); err != nil {
@@ -85,7 +82,7 @@ func (t *Trash) setAside() []aside {
 				continue
 			}
 			d, err := time.Parse("2006-01-02", name)
-			if err != nil || int(today.Sub(d).Hours()/24) <= t.cfg.RetentionDays {
+			if err != nil || t.cfg.RetentionDays <= 0 || int(today.Sub(d).Hours()/24) <= t.cfg.RetentionDays {
 				continue
 			}
 			orig := path.Join(TrashDir, name)

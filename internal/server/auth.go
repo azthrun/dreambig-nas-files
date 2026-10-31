@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/base64"
 	"errors"
 	"github.com/azthrun/dreambig-nas-files/internal/access"
 	"net"
@@ -13,6 +14,8 @@ import (
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/i18n"
 	"github.com/azthrun/dreambig-nas-files/internal/identity"
+	"github.com/azthrun/dreambig-nas-files/internal/resolver"
+	"github.com/azthrun/dreambig-nas-files/internal/upload"
 )
 
 const (
@@ -57,18 +60,49 @@ func (s *server) protected(h http.HandlerFunc) http.Handler {
 	})
 }
 
-// requestedPath is the Path a /files request names, for the audit line of a request that
-// was refused before any handler ran; empty for other routes and for a string that is
-// not a valid Path.
+// requestedPath is the Path a request names, for the audit line of a request that was
+// refused before any handler ran: /files requests carry it in the URL, an Upload
+// creation in its tus metadata, a skip report in its form field. Empty where the request
+// names none (an Upload id alone) and for a string that is not a valid Path. It is
+// only for the audit line; nothing of it is ever sent back.
 func requestedPath(r *http.Request) string {
-	if !strings.HasPrefix(r.URL.Path, filesPrefix+"/") {
-		return ""
+	var raw string
+	switch {
+	case strings.HasPrefix(r.URL.Path, filesPrefix+"/"):
+		p, err := pathFromRequest(r)
+		if err != nil {
+			return ""
+		}
+		return p.String()
+	case r.Method == http.MethodPost && (r.URL.Path == upload.BasePath || r.URL.Path == strings.TrimSuffix(upload.BasePath, "/")):
+		raw = tusMetadata(r.Header.Get("Upload-Metadata"), "path")
+	case r.Method == http.MethodPost && r.URL.Path == upload.BasePath+"skip":
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
+			r.Body = http.MaxBytesReader(nil, r.Body, 64<<10)
+			raw = r.PostFormValue("path")
+		}
 	}
-	p, err := pathFromRequest(r)
-	if err != nil {
+	p, err := resolver.Parse(raw)
+	if raw == "" || err != nil {
 		return ""
 	}
 	return p.String()
+}
+
+// tusMetadata reads one value of a tus Upload-Metadata header ("key base64,key base64").
+func tusMetadata(header, key string) string {
+	for _, pair := range strings.Split(header, ",") {
+		k, v, _ := strings.Cut(strings.TrimSpace(pair), " ")
+		if k != key {
+			continue
+		}
+		b, err := base64.StdEncoding.DecodeString(v)
+		if err != nil {
+			return ""
+		}
+		return string(b)
+	}
+	return ""
 }
 
 func safeMethod(m string) bool {

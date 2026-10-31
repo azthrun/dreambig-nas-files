@@ -6,6 +6,8 @@ package download
 import (
 	"archive/zip"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"time"
 
@@ -31,7 +33,7 @@ type Item struct {
 // entries that are refused, Hidden or invalid are silently left out.
 //
 // Entries that fail to read (vanished, unreadable) are left out too, but listed: Zip then
-// ends with IncompleteName, whose text is note followed by one Path per line. It returns
+// ends with a note (IncompleteName, or a free variant of it), whose text is note followed by one Path per line. It returns
 // how many entries were left out for that reason.
 func Zip(ctx context.Context, w io.Writer, res *resolver.Resolver, allow func(resolver.Location) bool, now time.Time, note string, items []Item) (omitted int, err error) {
 	z := &walk{ctx: ctx, res: res, allow: allow, zw: zip.NewWriter(w)}
@@ -41,7 +43,7 @@ func Zip(ctx context.Context, w io.Writer, res *resolver.Resolver, allow func(re
 		}
 	}
 	if len(z.missed) > 0 {
-		hdr := &zip.FileHeader{Name: IncompleteName, Method: zip.Store, Modified: now}
+		hdr := &zip.FileHeader{Name: z.noteName(items), Method: zip.Store, Modified: now}
 		f, err := z.zw.CreateHeader(hdr)
 		if err != nil {
 			return len(z.missed), err
@@ -87,6 +89,7 @@ func (z *walk) add(p resolver.Path, loc resolver.Location, name string, chain []
 			}
 		}
 		if len(chain) >= maxDepth {
+			z.miss(p) // too deep to follow: left out, and say so
 			return nil
 		}
 		hdr := &zip.FileHeader{Name: name + "/", Method: zip.Store, Modified: fi.ModTime()}
@@ -108,7 +111,14 @@ func (z *walk) add(p resolver.Path, loc resolver.Location, name string, chain []
 			// Each entry is judged on its own: the resolver follows its symlinks to the
 			// real target (Hidden, outside the Root), allow checks that target's Mount.
 			cl, err := z.res.Resolve(child)
-			if err != nil || !cl.Exists || !z.allow(cl) {
+			if errors.Is(err, resolver.ErrHidden) || errors.Is(err, resolver.ErrOutsideRoot) {
+				continue // excluded on purpose, silently
+			}
+			if err != nil || !cl.Exists {
+				z.miss(child) // gone since the listing, or unreadable: say so
+				continue
+			}
+			if !z.allow(cl) {
 				continue
 			}
 			if err := z.add(child, cl, name+"/"+e.Name, chain); err != nil {
@@ -134,6 +144,20 @@ func (z *walk) add(p resolver.Path, loc resolver.Location, name string, chain []
 	}
 	_, err = io.Copy(dst, &ctxReader{ctx: z.ctx, r: f})
 	return err
+}
+
+// noteName is IncompleteName, or the first numbered variant no top-level item uses, so
+// the note never doubles or replaces a selected file of that name.
+func (z *walk) noteName(items []Item) string {
+	taken := map[string]bool{}
+	for _, it := range items {
+		taken[it.Name] = true
+	}
+	name := IncompleteName
+	for i := 2; taken[name]; i++ {
+		name = fmt.Sprintf("_incomplete (%d).txt", i)
+	}
+	return name
 }
 
 func (z *walk) miss(p resolver.Path) { z.missed = append(z.missed, p.String()) }
