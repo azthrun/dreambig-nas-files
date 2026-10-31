@@ -92,6 +92,32 @@ func (t *Trash) Place(mount, rel string) (string, error) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	return t.placeLocked(root, mount, rel)
+}
+
+// Locked runs fn holding the process-wide write lock, so a caller can combine a
+// placement with its own tree change (an Upload that replaces a file: Trash the old one,
+// then link the new one) without another delete or placement slipping in between. place
+// is Place without taking the lock again; fn must not call Place itself.
+func (t *Trash) Locked(fn func(place func(mount, rel string) (string, error)) error) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return fn(func(mount, rel string) (string, error) {
+		root, ok := t.roots[mount]
+		if !ok {
+			return "", ErrNoMount
+		}
+		if t.readOnly[mount] {
+			return "", ErrReadOnly
+		}
+		if !validRel(rel) {
+			return "", ErrInvalid
+		}
+		return t.placeLocked(root, mount, rel)
+	})
+}
+
+func (t *Trash) placeLocked(root *os.Root, mount, rel string) (string, error) {
 	fi, err := root.Lstat(rel)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", ErrNotFound

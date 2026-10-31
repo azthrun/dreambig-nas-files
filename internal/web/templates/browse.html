@@ -6,12 +6,22 @@
  data-msg-cancel="{{t $.Lang "upload.cancel"}}" data-msg-waiting="{{t $.Lang "upload.waiting"}}" data-msg-uploading="{{t $.Lang "upload.uploading"}}"
  data-msg-done="{{t $.Lang "upload.done"}}" data-msg-cancelled="{{t $.Lang "upload.cancelled"}}" data-msg-exists="{{t $.Lang "upload.exists"}}"
  data-msg-refused="{{t $.Lang "upload.refused"}}" data-msg-bad_name="{{t $.Lang "upload.bad_name"}}" data-msg-failed="{{t $.Lang "upload.failed"}}" data-msg-no_space="{{t $.Lang "upload.no_space"}}"
- data-msg-finished="{{t $.Lang "upload.finished"}}">
+ data-msg-finished="{{t $.Lang "upload.finished"}}"
+ data-msg-conflict_prompt="{{t $.Lang "upload.conflict_prompt"}}" data-msg-conflict_trashed="{{t $.Lang "upload.conflict_trashed"}}"
+ data-msg-conflict_wait="{{t $.Lang "upload.conflict_wait"}}" data-msg-folder_exists="{{t $.Lang "upload.folder_exists"}}"
+ data-msg-skipped="{{t $.Lang "upload.skipped"}}">
 <h2>{{t $.Lang "upload.title"}}</h2>
 <p><label for="upload-files">{{t $.Lang "upload.choose"}}</label> <input type="file" id="upload-files" multiple></p>
 <p><button type="button" id="upload-start">{{t $.Lang "upload.start"}}</button> <button type="button" id="upload-cancel" hidden>{{t $.Lang "upload.cancel_all"}}</button></p>
 <p>{{t $.Lang "upload.overall"}} <progress id="upload-total" max="100" value="0"></progress> <span id="upload-total-text"></span></p>
 <ul id="upload-list"></ul>
+<div id="upload-conflict" class="upload-conflict" role="alertdialog" aria-labelledby="upload-conflict-name" hidden>
+<p><strong id="upload-conflict-name"></strong> <span id="upload-conflict-text"></span></p>
+<p><button type="button" id="upload-conflict-skip">{{t $.Lang "upload.skip"}}</button>
+<button type="button" id="upload-conflict-keep">{{t $.Lang "upload.keep_both"}}</button>
+<button type="button" id="upload-conflict-replace">{{t $.Lang "upload.replace"}}</button></p>
+<p><label><input type="checkbox" id="upload-conflict-all"> {{t $.Lang "upload.apply_all"}}</label></p>
+</div>
 <p id="upload-status" role="status"></p>
 </section>
 <script src="/static/vendor/tus-js-client/tus.min.js" defer></script>
