@@ -33,6 +33,7 @@ var refusals = []struct {
 	{resolver.ErrHidden, http.StatusNotFound, "error.not_found"},
 	{resolver.ErrOutsideRoot, http.StatusNotFound, "error.not_found"},
 	{resolver.ErrNotFolder, http.StatusNotFound, "error.not_found"},
+	{errNotFile, http.StatusNotFound, "error.not_found"},
 	{trash.ErrNotFound, http.StatusNotFound, "error.not_found"},
 	{fs.ErrNotExist, http.StatusNotFound, "error.not_found"},
 	{errExists, http.StatusConflict, "error.exists"},

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -8,6 +9,10 @@ import (
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/resolver"
 )
+
+// errNotFile is a Path that exists but is neither a folder nor a regular file. It looks
+// like not-found (404) and, unlike a plain miss, is audited.
+var errNotFile = errors.New("not a regular file")
 
 // countingWriter records the status and body bytes actually sent, for the audit line.
 type countingWriter struct {

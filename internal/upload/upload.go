@@ -29,7 +29,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"path"
 	"regexp"
 	"strings"
 
@@ -342,7 +341,8 @@ func isConflict(err error) bool {
 }
 
 // record writes the audit line for a finished request: creation, completion, cancel, and
-// every refusal or failure. Progress PATCHes and routine HEADs are not audited.
+// every refusal or failure. Progress PATCHes and routine HEADs are not audited, and nor is
+// OPTIONS, which only asks what the server can do.
 func (h *Handler) record(method string, status int, st *reqState) {
 	ev := audit.Event{User: st.user, Path: st.path, Status: status, Choice: string(st.choice), Requested: st.requested}
 	switch {
@@ -371,7 +371,10 @@ func (h *Handler) record(method string, status int, st *reqState) {
 	case http.MethodDelete:
 		ev.Operation = "upload_cancel"
 	default:
-		if status < 400 || !st.denied {
+		// A HEAD that misses is how a client learns to start again; somebody else's
+		// Upload and a method nothing serves are still refusals.
+		routineHead := method == http.MethodHead && !st.denied && status != http.StatusMethodNotAllowed
+		if status < 400 || routineHead || method == http.MethodOptions {
 			return
 		}
 		ev.Operation = "upload_status"
@@ -405,6 +408,9 @@ func (h *Handler) destination(user, raw string) (resolver.Path, resolver.Locatio
 	}
 	if _, ok := h.store.mounts[loc.Mount.Name]; !ok {
 		return p, loc, resolver.ErrNotFound // a read-only Mount has no Staging Area
+	}
+	if loc.TooLong {
+		return p, loc, resolver.ErrTooLong
 	}
 	return p, loc, nil
 }
@@ -510,10 +516,13 @@ func (h *Handler) complete(ctx context.Context, st *reqState, u handler.Upload, 
 		if again, err = h.Resolver.Resolve(p); err == nil {
 			err = h.Authorize(st.user, again)
 		}
-		if err == nil && (again.Mount.Name != loc.Mount.Name || again.Exists) {
+		if err == nil && again.Mount.Name != loc.Mount.Name {
 			err = resolver.ErrNotFound
 		}
-		loc = again
+		if err == nil && again.TooLong {
+			err = resolver.ErrTooLong
+		}
+		loc = again // if another Upload landed here meanwhile, Place meets the Conflict
 	}
 	if err != nil {
 		return err
@@ -522,8 +531,8 @@ func (h *Handler) complete(ctx context.Context, st *reqState, u handler.Upload, 
 	if err := h.place.Place(Placement{User: st.user, Dest: loc, Staged: stagedName(info.ID), Choice: choice, Final: &final}); err != nil {
 		return err
 	}
-	if final != loc.Rel() { // keep both: the audit line names where the file is
-		if landed, err := p.Parent().Join(path.Base(final)); err == nil {
+	if final != loc.Rel() { // keep both: the audit line names where the file really is
+		if landed, err := resolver.Parse(loc.Mount.Name + "/" + final); err == nil {
 			st.requested, st.path = p.String(), landed.String()
 		}
 	}

@@ -13,6 +13,10 @@ import (
 // breaks the write-side rules. It is also an ErrInvalidPath (400).
 var ErrInvalidName = errors.New("invalid name")
 
+// ErrTooLong is an ErrInvalidName for a Path longer than the filesystem takes. Answer a
+// Location with TooLong set with it before creating anything there.
+var ErrTooLong error = badName("too long")
+
 // maxNameBytes is the longest single name Synology's filesystems accept.
 const maxNameBytes = 255
 
@@ -43,7 +47,7 @@ func ValidateName(name string) (string, error) {
 	case strings.HasSuffix(n, ".") || strings.HasSuffix(n, " "):
 		return "", badName("trailing dot or space")
 	case len(n) > maxNameBytes:
-		return "", badName("too long")
+		return "", ErrTooLong
 	case windowsReserved[strings.ToLower(stem(n))]:
 		return "", badName("reserved name")
 	case mounts.IsHiddenName(n):

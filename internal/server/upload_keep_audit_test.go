@@ -24,6 +24,33 @@ func TestKeepBothAuditsTheFinalPathAndRemembersTheRequestedOne(t *testing.T) {
 	}
 }
 
+// Keep both lands beside a link's target, so that is the Path the line names.
+func TestKeepBothOnASymlinkAuditsWhereTheFileIs(t *testing.T) {
+	for name, tc := range map[string]struct{ target, final string }{
+		"same Mount":    {"store/r.pdf", "docs/store/r (1).pdf"},
+		"another Mount": {"../other/r.pdf", "other/r (1).pdf"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := upEnv(t)
+			e.WriteFile("docs/store/r.pdf", "old")
+			e.WriteFile("other/r.pdf", "old")
+			e.Symlink("docs/x.pdf", tc.target)
+			c := e.SignIn("alice")
+
+			if rec := uploadWith(t, c, "docs/x.pdf", "keep", "new"); rec.Code != http.StatusNoContent {
+				t.Fatalf("PATCH = %d: %s", rec.Code, rec.Body)
+			}
+			if got := e.ReadFile(tc.final); got != "new" {
+				t.Fatalf("file = %q", got)
+			}
+			l := lastAuditOf(t, e, "upload")
+			if l == nil || l["path"] != tc.final || l["requested"] != "docs/x.pdf" {
+				t.Fatalf("want %s and the requested Path, got %v", tc.final, l)
+			}
+		})
+	}
+}
+
 func TestALateKeepBothAuditsTheFinalPath(t *testing.T) {
 	e := upEnv(t)
 	c := e.SignIn("alice")

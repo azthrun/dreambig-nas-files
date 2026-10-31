@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/i18n"
 )
 
@@ -29,6 +30,11 @@ func langOf(r *http.Request) string {
 func (s *server) switchLanguage(w http.ResponseWriter, r *http.Request) {
 	code := r.PathValue("code")
 	if !i18n.Supported(code) {
+		ev := audit.Event{Operation: "lang", Outcome: audit.Refused, Status: http.StatusNotFound}
+		if sess := s.currentSession(w, r); sess != nil { // public: there may be no User
+			ev.User = sess.User
+		}
+		s.Audit.Record(ev)
 		s.errorPage(w, r, http.StatusNotFound, "error.not_found")
 		return
 	}

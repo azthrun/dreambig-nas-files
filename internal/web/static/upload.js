@@ -131,7 +131,7 @@
     var res = err && err.originalResponse;
     var code = res ? res.getStatus() : 0;
     if (code === 507) { return ["failed", msg("no_space")]; } // ERR_INSUFFICIENT_SPACE: free-space reserve
-    if (code === 409) { return ["exists", msg("exists")]; }
+    if (code === 409) { return offsetMismatch(err) ? ["failed", msg("failed")] : ["exists", msg("exists")]; }
     if (code === 403 || code === 404) { return ["failed", msg("refused")]; }
     if (code === 400) { return ["failed", msg("bad_name")]; }
     return ["failed", msg("failed")];
@@ -146,6 +146,10 @@
     var res = err && err.originalResponse;
     return res && res.getBody ? String(res.getBody()) : "";
   }
+
+  // tusd answers 409 to a PATCH at the wrong offset too: another tab is sending the same
+  // file through the same resume URL. That is no Conflict and nothing waits to be resolved.
+  function offsetMismatch(err) { return conflictBody(err).indexOf("ERR_MISMATCHED_OFFSET") >= 0; }
 
   function isLate(err) {
     var req = err && err.originalRequest;
@@ -320,11 +324,12 @@
       headers: { "X-CSRF-Token": token },
       // A 409 (Conflict, for the User to settle) and a 507 (no room) are answers, not
       // outages: show them at once instead of retrying (tus-js-client retries 409, and a
-      // folder of existing files would otherwise wait on each one).
+      // folder of existing files would otherwise wait on each one). A mismatched offset is
+      // the exception: a retry asks the server where the Upload stands.
       onShouldRetry: function (err, retryAttempt, options) {
         var res = err && err.originalResponse;
         var code = res ? res.getStatus() : 0;
-        if (code === 409 || code === 507) { return false; }
+        if ((code === 409 && !offsetMismatch(err)) || code === 507) { return false; }
         return tus.defaultOptions.onShouldRetry(err, retryAttempt, options);
       },
       metadata: md,
@@ -337,7 +342,7 @@
       onError: function (err) {
         if (it.state === "cancelled") { return; }
         var res = err && err.originalResponse;
-        if (res && res.getStatus() === 409) {
+        if (res && res.getStatus() === 409 && !offsetMismatch(err)) {
           conflicted(it, 409, conflictBody(err), isLate(err));
           return;
         }

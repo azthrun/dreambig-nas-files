@@ -52,6 +52,10 @@ type Location struct {
 	Real []string
 	// Exists is false for a Path that names nothing yet (a place to create).
 	Exists bool
+	// TooLong means a name, or the whole Path, is longer than the filesystem takes, so
+	// nothing can exist there. Read as a miss. Do not create it: os.Root walks one folder
+	// at a time and would manage, leaving something no later request can reach.
+	TooLong bool
 
 	isRoot bool
 	res    *Resolver
@@ -156,8 +160,12 @@ func isASCII(s string) bool {
 	return true
 }
 
-// normalisedMatch finds the entry of dir (inside root) whose NFC form is want.
+// normalisedMatch finds the entry of dir (inside root) whose NFC form is want. Only a
+// folder is opened: opening a FIFO would block for good.
 func normalisedMatch(root *os.Root, dir, want string) (string, bool) {
+	if fi, err := root.Stat(dir); err != nil || !fi.IsDir() {
+		return "", false
+	}
 	f, err := root.Open(dir)
 	if err != nil {
 		return "", false
@@ -179,14 +187,17 @@ func normalisedMatch(root *os.Root, dir, want string) (string, bool) {
 func (r *Resolver) locate(mount mounts.Mount, segs []string) (Location, error) {
 	n := len(segs)
 	var real string
+	tooLong := false
 	for ; ; n-- {
 		abs := filepath.Join(append([]string{mount.Dir}, segs[:n]...)...)
 		got, err := filepath.EvalSymlinks(abs)
-		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		long := errors.Is(err, syscall.ENAMETOOLONG)
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) || long {
+			tooLong = tooLong || long
 			if n == 0 {
 				return Location{}, ErrNotFound // the Mount folder itself vanished
 			}
-			continue // missing, or a file stands where a folder should
+			continue // missing, too long to exist, or a file stands where a folder should
 		}
 		if err != nil && isLoop(err) {
 			return Location{}, ErrNotFound // a symlink loop leads nowhere
@@ -207,10 +218,11 @@ func (r *Resolver) locate(mount mounts.Mount, segs []string) (Location, error) {
 		}
 	}
 	return Location{
-		Mount:  owner,
-		Real:   append(rel, segs[n:]...),
-		Exists: n == len(segs),
-		res:    r,
+		Mount:   owner,
+		Real:    append(rel, segs[n:]...),
+		Exists:  n == len(segs),
+		TooLong: tooLong,
+		res:     r,
 	}, nil
 }
 

@@ -85,15 +85,18 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 		if err = s.authorize(user, loc, access.Read); err == nil {
 			var fi fs.FileInfo
 			if fi, err = loc.Stat(); err == nil {
-				if !fi.IsDir() { // a file: download it
+				switch {
+				case fi.Mode().IsRegular(): // a file: download it
 					s.download(w, r, user, p, loc, fi)
 					return
-				}
-				if r.URL.Query().Has("zip") { // a folder as one zip
+				case !fi.IsDir(): // a FIFO, say: opening it could block for good
+					err = errNotFile
+				case r.URL.Query().Has("zip"): // a folder as one zip
 					s.zipFolder(w, r, user, p, loc)
 					return
+				default:
+					entries, err = loc.ReadDir()
 				}
-				entries, err = loc.ReadDir()
 			}
 		}
 	}
