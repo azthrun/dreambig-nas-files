@@ -122,12 +122,12 @@ func (s *server) loginForm(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	name, password := r.PostFormValue("name"), r.PostFormValue("password")
-	userKey, ipKey := "user:"+name, "ip:"+clientIP(r)
+	keys := []string{userKey(name), ipKey(clientIP(r))}
 	fail := func(status int, key string) {
 		s.audit.Record(audit.Event{User: name, Operation: "signin", Outcome: audit.Refused, Status: status})
 		s.render(w, r, status, "login.html", page{Title: i18n.T(langOf(r), "signin.title"), Name: name, Error: i18n.T(langOf(r), key)})
 	}
-	if s.limiter.blocked(userKey, ipKey) {
+	if s.limiter.blocked(keys...) {
 		fail(http.StatusTooManyRequests, "signin.failed")
 		return
 	}
@@ -136,7 +136,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		if !errors.Is(err, identity.ErrInvalidCredentials) {
 			s.Log.Error("authenticate", "err", err)
 		}
-		s.limiter.fail(userKey, ipKey)
+		s.limiter.fail(keys...)
 		fail(http.StatusUnauthorized, "signin.failed")
 		return
 	}
