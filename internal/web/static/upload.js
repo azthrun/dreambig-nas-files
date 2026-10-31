@@ -610,6 +610,7 @@
       if (held) { moveFocus(); }
       return;
     }
+    allChoice = ""; // a pick joining before the run winds down must not inherit it
     for (i = 0; i < items.length; i++) { // waiting ones first, so none starts meanwhile
       if (items[i].state === "waiting") { cancelItem(items[i]); }
     }
