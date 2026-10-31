@@ -15,6 +15,7 @@ import (
 	"slices"
 
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
+	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 )
 
 // Level is what a User may do in a Mount. Levels are ordered: None < Read < Write.
@@ -69,7 +70,7 @@ func (t *Table) Level(user string, m mounts.Mount) Level {
 func Load(path string, users []string, ms []mounts.Mount) (*Table, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("Access file: %w", scrubPath(err))
+		return nil, fmt.Errorf("Access file: %w", scrub.Path(err))
 	}
 	defer f.Close()
 	t, err := Parse(f, users, ms)
@@ -77,14 +78,6 @@ func Load(path string, users []string, ms []mounts.Mount) (*Table, error) {
 		return nil, fmt.Errorf("Access file: %w", err)
 	}
 	return t, nil
-}
-
-func scrubPath(err error) error {
-	var pe *os.PathError
-	if errors.As(err, &pe) {
-		return pe.Err
-	}
-	return err
 }
 
 // Parse is Load for an already-open file.

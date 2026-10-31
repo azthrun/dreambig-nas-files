@@ -20,6 +20,7 @@ import (
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/clock"
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
+	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 )
 
 // infoSuffix is the extension of tusd's per-Upload info file.
@@ -74,7 +75,7 @@ func NewKeeper(cfg KeeperConfig) *Keeper {
 func statfsFree(m mounts.Mount) (int64, error) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(m.Path, &st); err != nil {
-		return 0, fmt.Errorf("statfs: %w", scrubPath(err))
+		return 0, fmt.Errorf("statfs: %w", scrub.Path(err))
 	}
 	free := uint64(st.Bavail) * uint64(st.Bsize)
 	if free > math.MaxInt64 {
@@ -105,7 +106,7 @@ func (k *Keeper) touch(dir, id string) {
 	now := k.cfg.Clock.Now()
 	for _, name := range []string{id, id + infoSuffix} {
 		if err := os.Chtimes(filepath.Join(dir, name), now, now); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			k.cfg.Log.Error("touch staged upload", "err", scrubPath(err))
+			k.cfg.Log.Error("touch staged upload", "err", scrub.Path(err))
 		}
 	}
 }
@@ -129,7 +130,7 @@ func (k *Keeper) Sweep(ctx context.Context) {
 		}
 		ents, err := os.ReadDir(dir)
 		if err != nil {
-			k.cfg.Log.Error("expire uploads: list staging area", "mount", m.Name, "err", scrubPath(err))
+			k.cfg.Log.Error("expire uploads: list staging area", "mount", m.Name, "err", scrub.Path(err))
 			continue
 		}
 		ids := map[string]bool{}
@@ -192,7 +193,7 @@ func (k *Keeper) expireOne(m mounts.Mount, dir, id string) {
 	// Info first: once it is gone tusd no longer finds the Upload.
 	for _, name := range []string{id + infoSuffix, id} {
 		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			k.cfg.Log.Error("expire upload", "mount", m.Name, "id", id, "err", scrubPath(err))
+			k.cfg.Log.Error("expire upload", "mount", m.Name, "id", id, "err", scrub.Path(err))
 			ev.Outcome = audit.Failed
 		}
 	}

@@ -83,11 +83,11 @@ func (s *store) NewUpload(ctx context.Context, info handler.FileInfo) (handler.U
 	}
 	fs, err := s.files(m, true)
 	if err != nil {
-		return nil, s.scrub(ctx, "staging: new upload", err)
+		return nil, s.sanitize(ctx, "staging: new upload", err)
 	}
 	u, err := fs.NewUpload(ctx, info)
 	if err != nil {
-		return nil, s.scrub(ctx, "staging: new upload", err)
+		return nil, s.sanitize(ctx, "staging: new upload", err)
 	}
 	if info, err := u.GetInfo(ctx); err == nil {
 		s.keeper.touch(fs.Path, info.ID)
@@ -106,7 +106,7 @@ func (s *store) GetUpload(ctx context.Context, id string) (handler.Upload, error
 			continue
 		}
 		if err != nil {
-			return nil, s.scrub(ctx, "staging: get upload", err)
+			return nil, s.sanitize(ctx, "staging: get upload", err)
 		}
 		return &stagedUpload{Upload: u, fs: fs, s: s, mount: name}, nil
 	}
@@ -117,9 +117,9 @@ func (s *store) AsTerminatableUpload(u handler.Upload) handler.TerminatableUploa
 	return u.(*stagedUpload)
 }
 
-// scrub passes tusd's own errors (they carry a status and a safe message) and replaces
+// sanitize passes tusd's own errors (they carry a status and a safe message) and replaces
 // anything else with errInternal, logging the real error.
-func (s *store) scrub(ctx context.Context, what string, err error) error {
+func (s *store) sanitize(ctx context.Context, what string, err error) error {
 	var tusErr handler.Error
 	if errors.As(err, &tusErr) {
 		return err
@@ -139,7 +139,7 @@ type stagedUpload struct {
 func (u *stagedUpload) WriteChunk(ctx context.Context, offset int64, src io.Reader) (int64, error) {
 	n, err := u.Upload.WriteChunk(ctx, offset, src)
 	if err != nil {
-		err = u.s.scrub(ctx, "staging: write", err)
+		err = u.s.sanitize(ctx, "staging: write", err)
 	}
 	if n > 0 {
 		if info, ierr := u.Upload.GetInfo(ctx); ierr == nil {
@@ -153,7 +153,7 @@ func (u *stagedUpload) WriteChunk(ctx context.Context, offset int64, src io.Read
 // few things the service ever removes (CODING_STANDARDS.md).
 func (u *stagedUpload) Terminate(ctx context.Context) error {
 	if err := u.fs.AsTerminatableUpload(u.Upload).Terminate(ctx); err != nil {
-		return u.s.scrub(ctx, "staging: terminate", err)
+		return u.s.sanitize(ctx, "staging: terminate", err)
 	}
 	return nil
 }

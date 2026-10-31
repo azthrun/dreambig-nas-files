@@ -13,6 +13,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
+	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 )
 
 // Resolver turns Paths into real locations. It holds one os.Root per Mount, because
@@ -186,7 +187,7 @@ func (r *Resolver) locate(mount mounts.Mount, segs []string) (Location, error) {
 			return Location{}, ErrNotFound // a symlink loop leads nowhere
 		}
 		if err != nil {
-			return Location{}, fmt.Errorf("resolve path: %w", scrub(err))
+			return Location{}, fmt.Errorf("resolve path: %w", scrub.Path(err))
 		}
 		real = got
 		break
@@ -236,15 +237,6 @@ func (r *Resolver) ownerOf(real string) (mounts.Mount, []string, bool) {
 	return *best, strings.Split(rest, string(filepath.Separator)), true
 }
 
-// scrub drops the OS path from a *PathError so errors never carry absolute NAS paths.
-func scrub(err error) error {
-	var pe *os.PathError
-	if errors.As(err, &pe) {
-		return pe.Err
-	}
-	return err
-}
-
 // Stat describes the target, following symlinks. ErrNotFound when it does not exist.
 func (l Location) Stat() (fs.FileInfo, error) {
 	if l.isRoot {
@@ -285,7 +277,7 @@ func mapIO(err error) error {
 	if strings.Contains(err.Error(), "escapes") {
 		return ErrOutsideRoot
 	}
-	return fmt.Errorf("io: %w", scrub(err))
+	return fmt.Errorf("io: %w", scrub.Path(err))
 }
 
 // Entry is one visible item in a folder.
@@ -313,7 +305,7 @@ func (l Location) ReadDir() ([]Entry, error) {
 	}
 	des, err := f.ReadDir(-1)
 	if err != nil {
-		return nil, fmt.Errorf("read folder: %w", scrub(err))
+		return nil, fmt.Errorf("read folder: %w", scrub.Path(err))
 	}
 	out := make([]Entry, 0, len(des))
 	for _, de := range des {

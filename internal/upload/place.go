@@ -13,6 +13,7 @@ import (
 
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
 	"github.com/azthrun/dreambig-nas-files/internal/resolver"
+	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 	"github.com/azthrun/dreambig-nas-files/internal/trash"
 )
 
@@ -81,7 +82,7 @@ func linkExclusive(root *os.Root, staged, rel string) error {
 		case errors.Is(err, fs.ErrNotExist):
 			return resolver.ErrNotFound // the parent folder vanished
 		}
-		return fmt.Errorf("link into place: %w", scrubPath(err))
+		return fmt.Errorf("link into place: %w", scrub.Path(err))
 	}
 	return nil
 }
@@ -190,7 +191,7 @@ func (c ChoicePlacer) replace(root *os.Root, p Placement, rel string) error {
 				return fmt.Errorf("replace: %w", err)
 			}
 		case !errors.Is(err, fs.ErrNotExist):
-			return fmt.Errorf("replace: %w", scrubPath(err))
+			return fmt.Errorf("replace: %w", scrub.Path(err))
 		}
 		err = linkExclusive(root, p.Staged, rel)
 		if err == nil {
@@ -208,11 +209,11 @@ func (c ChoicePlacer) replace(root *os.Root, p Placement, rel string) error {
 		if rerr := root.Link(trashed, rel); rerr == nil {
 			rerr = root.Remove(trashed)
 			if rerr != nil && c.Log != nil {
-				c.Log.Error("replace: remove restored copy from the Trash", "err", scrubPath(rerr))
+				c.Log.Error("replace: remove restored copy from the Trash", "err", scrub.Path(rerr))
 			}
 		} else {
 			if c.Log != nil {
-				c.Log.Error("replace: restore the old file", "err", scrubPath(rerr))
+				c.Log.Error("replace: restore the old file", "err", scrub.Path(rerr))
 			}
 			return replacedKept{trash: trashed}
 		}
@@ -229,12 +230,3 @@ func takenIsConflict(err error) error {
 
 // stagedName is where Upload id's data waits, relative to its Mount.
 func stagedName(id string) string { return path.Join(mounts.StagingDir, id) }
-
-// scrubPath drops OS paths from link errors so they never reach a User.
-func scrubPath(err error) error {
-	var le *os.LinkError
-	if errors.As(err, &le) {
-		return le.Err
-	}
-	return err
-}

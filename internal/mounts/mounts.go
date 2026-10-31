@@ -15,6 +15,8 @@ import (
 	"syscall"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 )
 
 // Mount is one validated Mount.
@@ -42,7 +44,7 @@ type Options struct {
 func Discover(root string, opts Options) ([]Mount, error) {
 	rootInfo, err := os.Stat(root)
 	if err != nil {
-		return nil, fmt.Errorf("data directory: %w", scrub(err))
+		return nil, fmt.Errorf("data directory: %w", scrub.Path(err))
 	}
 	rootDev, ok := deviceOf(rootInfo)
 	if !ok {
@@ -50,7 +52,7 @@ func Discover(root string, opts Options) ([]Mount, error) {
 	}
 	entries, err := os.ReadDir(root) // sorted by file name
 	if err != nil {
-		return nil, fmt.Errorf("data directory: %w", scrub(err))
+		return nil, fmt.Errorf("data directory: %w", scrub.Path(err))
 	}
 	slices.SortFunc(entries, func(a, b os.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
 
@@ -61,7 +63,7 @@ func Discover(root string, opts Options) ([]Mount, error) {
 		path := filepath.Join(root, name)
 		info, err := os.Lstat(path)
 		if err != nil {
-			return nil, fmt.Errorf("Mount %q: %w", name, scrub(err))
+			return nil, fmt.Errorf("Mount %q: %w", name, scrub.Path(err))
 		}
 		if !info.IsDir() {
 			return nil, fmt.Errorf("Mount %q: not a folder; every entry under the data directory must be a Mount declared by a compose volume line", name)
@@ -80,7 +82,7 @@ func Discover(root string, opts Options) ([]Mount, error) {
 
 		real, err := filepath.EvalSymlinks(path)
 		if err != nil {
-			return nil, fmt.Errorf("Mount %q: %w", name, scrub(err))
+			return nil, fmt.Errorf("Mount %q: %w", name, scrub.Path(err))
 		}
 		if err := unix.Access(real, unix.R_OK|unix.X_OK); err != nil {
 			return nil, fmt.Errorf("Mount %q: not readable by the service's user; grant it Read access in DSM", name)
@@ -98,16 +100,6 @@ func Discover(root string, opts Options) ([]Mount, error) {
 		return nil, errors.New("no Mounts: add at least one compose volume line mounting a shared folder under the data directory")
 	}
 	return out, nil
-}
-
-// scrub drops the OS path from a *PathError so startup errors name only what the owner
-// configured.
-func scrub(err error) error {
-	var pe *os.PathError
-	if errors.As(err, &pe) {
-		return pe.Err
-	}
-	return err
 }
 
 func deviceOf(info os.FileInfo) (uint64, bool) {

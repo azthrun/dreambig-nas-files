@@ -8,6 +8,7 @@ Go. Read `GLOSSARY.md` and `docs/adr/` first. Code from the sibling services is 
 - `internal/config`: the only package that reads the environment.
 - `internal/mounts`: Mount discovery and validation, Hidden Entry names.
 - `internal/server`: routes, middleware, handlers. `routes.go` is the one place routes are registered.
+- `internal/scrub`: the one helper that drops OS paths from errors (`scrub.Path`). Wrap every `os` error in it before it leaves a package.
 - `internal/clock`: the only source of time. Never call `time.Now()` elsewhere.
 - `internal/testenv`: test support that builds the whole app around temp Mounts. Production code must not import it.
 - New modules from the spec (path resolver, identity, access, listing, download, uploads, trash, audit, i18n) each get their own `internal/<name>` package.

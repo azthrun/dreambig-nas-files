@@ -23,6 +23,7 @@ import (
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/clock"
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
+	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 )
 
 // Config is what a Trash needs from outside.
@@ -125,15 +126,15 @@ func (t *Trash) placeLocked(root *os.Root, mount, rel string) (string, error) {
 		return "", ErrNotFound
 	}
 	if err != nil {
-		return "", fmt.Errorf("trash: %w", scrub(err))
+		return "", fmt.Errorf("trash: %w", scrub.Path(err))
 	}
 	dir, err := folders(root, path.Join(TrashDir, t.cfg.Clock.Now().Format("2006-01-02")), path.Dir(rel))
 	if err != nil {
-		return "", fmt.Errorf("trash: %w", scrub(err))
+		return "", fmt.Errorf("trash: %w", scrub.Path(err))
 	}
 	dest, err := moveNoReplace(root, rel, dir, path.Base(rel), fi.IsDir())
 	if err != nil {
-		return "", fmt.Errorf("trash: %w", scrub(err))
+		return "", fmt.Errorf("trash: %w", scrub.Path(err))
 	}
 	return dest, nil
 }
@@ -260,19 +261,6 @@ func noHardLinks(err error) bool {
 		}
 	}
 	return false
-}
-
-// scrub drops the OS path from path errors so errors never carry absolute NAS paths.
-func scrub(err error) error {
-	var pe *os.PathError
-	if errors.As(err, &pe) {
-		return pe.Err
-	}
-	var le *os.LinkError
-	if errors.As(err, &le) {
-		return le.Err
-	}
-	return err
 }
 
 // TrashDir is the Trash folder name inside a Mount.
