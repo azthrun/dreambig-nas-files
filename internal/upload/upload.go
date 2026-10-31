@@ -29,6 +29,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"path"
 	"regexp"
 	"strings"
 
@@ -150,6 +151,7 @@ type reqState struct {
 	denied    bool // somebody else's Upload
 	choice    string
 	op        string // audit operation, when not the usual one for the method
+	requested string // the Path asked for, when the file landed at another one
 }
 
 func stateOf(ctx context.Context) *reqState {
@@ -350,7 +352,7 @@ func isConflict(err error) bool {
 // record writes the audit line for a finished request: creation, completion, cancel, and
 // every refusal or failure. Progress PATCHes and routine HEADs are not audited.
 func (h *Handler) record(method string, status int, st *reqState, bytes int64) {
-	ev := audit.Event{User: st.user, Path: st.path, Status: status, Choice: st.choice}
+	ev := audit.Event{User: st.user, Path: st.path, Status: status, Choice: st.choice, Requested: st.requested}
 	switch {
 	case status == http.StatusInsufficientStorage:
 		ev.Outcome = audit.Refused // the reserve said no; nothing broke
@@ -524,8 +526,14 @@ func (h *Handler) complete(ctx context.Context, st *reqState, u handler.Upload, 
 	if err != nil {
 		return err
 	}
-	if err := h.Place.Place(ctx, Placement{User: st.user, Dest: loc, Staged: stagedName(info.ID), Choice: choice}); err != nil {
+	final := loc.Rel()
+	if err := h.Place.Place(ctx, Placement{User: st.user, Dest: loc, Staged: stagedName(info.ID), Choice: choice, Final: &final}); err != nil {
 		return err
+	}
+	if final != loc.Rel() { // keep both: the audit line names where the file is
+		if landed, err := p.Parent().Join(path.Base(final)); err == nil {
+			st.requested, st.path = p.String(), landed.String()
+		}
 	}
 	// The file is in place; failing to drop the staged name only leaves a link for expiry.
 	if err := h.store.AsTerminatableUpload(u).Terminate(ctx); err != nil {

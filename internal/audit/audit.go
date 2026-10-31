@@ -44,6 +44,10 @@ type Event struct {
 	Bytes  int64
 	// Choice is the Conflict choice the User made (skip, keep, replace), when there was one.
 	Choice string
+	// Requested is the Path the User asked for when the operation ended up at a different
+	// one (a kept-both Upload lands at "name (1).ext"); Path is where it really is. Empty
+	// when they are the same.
+	Requested string
 }
 
 type line struct {
@@ -55,6 +59,7 @@ type line struct {
 	Status    int     `json:"status,omitempty"`
 	Bytes     int64   `json:"bytes,omitempty"`
 	Choice    string  `json:"choice,omitempty"`
+	Requested string  `json:"requested,omitempty"`
 }
 
 // Logger writes audit lines. Safe for concurrent use.
@@ -81,6 +86,7 @@ func (l *Logger) Record(e Event) {
 		Status:    e.Status,
 		Bytes:     e.Bytes,
 		Choice:    e.Choice,
+		Requested: e.Requested,
 	})
 	if err != nil {
 		return // cannot happen for these field types

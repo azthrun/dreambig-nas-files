@@ -33,6 +33,16 @@ type Placement struct {
 	// Choice is the User's Conflict choice from the Upload's metadata: "", ChoiceKeep or
 	// ChoiceReplace.
 	Choice string
+	// Final, when not nil, receives the location the file really got, relative to
+	// Dest.Mount (it differs from Dest.Rel() when keep both chose "name (1).ext").
+	Final *string
+}
+
+// placedAt tells the caller where the file went.
+func (p Placement) placedAt(rel string) {
+	if p.Final != nil {
+		*p.Final = rel
+	}
 }
 
 // ErrConflictFolder means a folder stands at the Path. Only skip is possible then:
@@ -103,6 +113,7 @@ func (LinkPlacer) Place(_ context.Context, p Placement) error {
 		}
 		return err
 	}
+	p.placedAt(p.Dest.Rel())
 	return nil
 }
 
@@ -143,20 +154,24 @@ func (c ChoicePlacer) Place(ctx context.Context, p Placement) error {
 	case "":
 		return LinkPlacer{}.Place(ctx, p)
 	case ChoiceKeep:
-		return c.keepBoth(root, p.Staged, rel)
+		return c.keepBoth(root, p, rel)
 	case ChoiceReplace:
 		return c.replace(root, p, rel)
 	}
 	return fmt.Errorf("unknown Conflict choice %q", p.Choice)
 }
 
-func (c ChoicePlacer) keepBoth(root *os.Root, staged, rel string) error {
+func (c ChoicePlacer) keepBoth(root *os.Root, p Placement, rel string) error {
 	if fi, err := root.Lstat(rel); err == nil && fi.IsDir() {
 		return ErrConflictFolder
 	}
 	for n := 0; n < maxKeepBoth; n++ {
-		err := linkExclusive(root, staged, numbered(rel, n))
+		name := numbered(rel, n)
+		err := linkExclusive(root, p.Staged, name)
 		if !errors.Is(err, errTaken) {
+			if err == nil {
+				p.placedAt(name)
+			}
 			return err
 		}
 	}
@@ -188,6 +203,7 @@ func (c ChoicePlacer) replace(root *os.Root, p Placement, rel string) error {
 		}
 		err = linkExclusive(root, p.Staged, rel)
 		if err == nil {
+			p.placedAt(rel)
 			return nil
 		}
 		if trashed == "" {
