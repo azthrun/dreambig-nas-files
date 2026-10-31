@@ -18,7 +18,7 @@ Go. Read `GLOSSARY.md` and `docs/adr/` first. Code from the sibling services is 
 - Judge Access by the real target's Mount after symlink resolution, never by the first segment as sent. Check Hidden Entries after resolution too.
 - Hidden Entries (`@*`, `#*`, `.DS_Store`, Staging Area, `.nas-files-trash`, `.nas-mcp-trash`) are never listed and look like not-found. An inaccessible Mount behaves as nonexistent (404, not 403).
 - Use `os.Root` (one per Mount) for I/O after validation.
-- Never destroy data. Delete and replace move to the Mount's Trash by atomic same-filesystem rename, never overwriting a Trash entry. Only Staging Area data, Trash purge and zero-length temp files may be removed.
+- Never destroy data. Delete and replace move to the Mount's Trash inside the same filesystem (rename for folders, link then unlink for files, since rename would replace), never overwriting a Trash entry. Only Staging Area data, Trash purge and zero-length temp files may be removed.
 - Never overwrite silently. Complete Uploads with a create-exclusive hard link; `rename` would replace.
 - The top level (Root and the Mounts themselves) is read-only. A read-only Mount refuses every change for every User.
 - Serialise tree changes (Trash placement, purge, delete) with one process-wide `sync.Mutex`; re-check the resolved parent right before the rename.
