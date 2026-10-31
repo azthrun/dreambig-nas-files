@@ -2,7 +2,8 @@
 # Image smoke test: usage scripts/smoke-test.sh <image>
 # Runs the built image as an arbitrary non-root uid with real bind mounts (each its own
 # mount point) and checks the walking-skeleton behaviour. Needs docker and curl.
-# Later tickets extend it with sign-in, Upload, download, delete and :ro write refusal.
+# Covers health, sign-in, Upload, download, delete and :ro write refusal (the last four in
+# smoke-flow.sh).
 set -euo pipefail
 
 image="${1:?usage: smoke-test.sh <image>}"
@@ -22,7 +23,7 @@ chmod 644 "$work/users.htpasswd"
 # Access file: smoke may write docs and archive (archive is :ro, so it caps at read).
 echo '{"smoke":{"docs":"write","archive":"write"}}' > "$work/access.json"
 chmod 644 "$work/access.json"
-echo hello > "$ro/readme.txt"
+printf hello > "$ro/readme.txt"
 chmod 644 "$ro/readme.txt"
 
 fail() { echo "SMOKE FAIL: $*" >&2; exit 1; }
@@ -100,6 +101,10 @@ if docker run --name "$name-bad" --user "$uid:$gid" -v "$rw:/data/docs" \
   fail "started with an Access file naming an unknown User"
 fi
 docker logs "$name-bad" 2>&1 | grep -q 'unknown User' || fail "no clear error for a bad Access file"
+
+# 6d. Sign-in, Upload (tus), download, delete, and the :ro Mount refusing changes, all
+# through the published port with a CSRF-aware curl flow.
+"$(dirname "$0")/smoke-flow.sh" "$base" smoke "$smoke_pw" docs archive
 
 # 7. With no Mounts the container refuses to start, with a clear error.
 if docker run --name "$name-empty" --user "$uid:$gid" "$image" > /dev/null 2>&1; then
