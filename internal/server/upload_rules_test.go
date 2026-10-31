@@ -228,8 +228,8 @@ func TestUploadDestinationsAreValidatedByTheResolver(t *testing.T) {
 		{"docs/.DS_Store", 400},
 		{"docs/out/x.txt", 404},       // symlink out of every Mount
 		{"docs/toarchive/x.txt", 403}, // symlink into a read-only Mount
-		{"docs/missing/x.txt", 404},   // parent folder does not exist
-		{"docs/file.txt/x.txt", 404},  // parent is a file
+		{"docs/missing/x.txt", 201},   // missing parents are created at completion
+		{"docs/file.txt/x.txt", 409},  // a file stands where a folder is needed
 		{"docs/file.txt", 409},        // exists
 		{"docs/sub", 409},             // a folder stands there
 		{"docs/ok.txt", 201},
