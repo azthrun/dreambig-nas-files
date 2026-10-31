@@ -10,7 +10,7 @@ import (
 // locker is tusd's in-memory Upload lock, with memorylocker's semantics (a contender
 // asks the holder to release, then waits), plus tryLock for expiry. memorylocker itself
 // cannot be used: every Lock asks the holder to release, so expiry probing an Upload
-// would cut off a Caller's request in progress.
+// would cut off a User's request in progress.
 type locker struct {
 	mu   sync.Mutex
 	held map[string]*lockEntry

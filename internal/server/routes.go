@@ -4,15 +4,18 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/upload"
 	"github.com/azthrun/dreambig-nas-files/internal/web"
 )
 
 // routes is the one place routes are registered.
 //
-// Public routes (no session) are only /healthz, sign-in (GET and POST /login) and
-// /static (the CSS the sign-in page itself needs). Every other route MUST be registered
-// with s.protected, which puts the session and CSRF checks in front of it.
+// Public routes (no session) are only /healthz, sign-in (GET and POST /login), /static
+// (the CSS and scripts the sign-in page itself needs) and /lang/<code> (the language
+// switch, which also works on the sign-in page). Static assets and the language switch
+// hold no file data; CODING_STANDARDS.md names them. Every other route MUST be
+// registered with s.protected, which puts the session and CSRF checks in front of it.
 //
 // File routes must not use ServeMux path cleaning (it redirects ".." instead of letting
 // the Path resolver refuse it); register a subtree pattern and let the handler parse
@@ -33,8 +36,8 @@ func (s *server) routes() http.Handler {
 
 // withFiles sends everything under /files straight to its handlers, bypassing the
 // ServeMux, whose path cleaning would redirect "..", "." and "//" instead of letting
-// the Path resolver refuse them. Later tickets add their /files/... methods in
-// filesRoute, always behind s.protected.
+// the Path resolver refuse them. Everything under /files is served by filesRoute,
+// always behind s.protected.
 func (s *server) withFiles(mux http.Handler) http.Handler {
 	files := s.protected(s.filesRoute)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -55,14 +58,14 @@ func (s *server) filesRoute(w http.ResponseWriter, r *http.Request) {
 		s.filesPost(w, r)
 	default:
 		w.Header().Set("Allow", "GET, HEAD, POST")
-		s.errorPage(w, r, http.StatusMethodNotAllowed, "error.method")
+		s.refuseRoute(w, r, http.StatusMethodNotAllowed)
 	}
 }
 
-// filesPost dispatches POST /files/<Path> by the form field op. Later tickets add their
-// plain-form operations here. op=zip is the browse selection form's download button
-// (names= checkboxes of the folder in the URL); op=delete (confirm page) and
-// op=delete-confirm (the move to the Trash) share that form.
+// filesPost dispatches POST /files/<Path> by the form field op: mkdir, zip (the browse
+// selection form's download button, names= checkboxes of the folder in the URL), delete
+// (the confirm page) and delete-confirm (the move to the Trash); the last three share
+// the selection form.
 func (s *server) filesPost(w http.ResponseWriter, r *http.Request) {
 	switch r.PostFormValue("op") {
 	case "mkdir":
@@ -79,8 +82,15 @@ func (s *server) filesPost(w http.ResponseWriter, r *http.Request) {
 	case "delete-confirm":
 		s.deleteItems(w, r)
 	default:
-		s.errorPage(w, r, http.StatusBadRequest, "error.method")
+		s.refuseRoute(w, r, http.StatusBadRequest)
 	}
+}
+
+// refuseRoute audits and answers a /files request that no handler takes: a method or a
+// form operation that does not exist.
+func (s *server) refuseRoute(w http.ResponseWriter, r *http.Request, status int) {
+	s.audit.Record(audit.Event{User: sessionOf(r).User, Operation: "files", Path: requestedPath(r), Outcome: audit.Refused, Status: status})
+	s.errorPage(w, r, status, "error.method")
 }
 
 // wrap applies middleware common to every route: security headers. Nothing here needs

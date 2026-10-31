@@ -20,6 +20,7 @@ import (
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/clock"
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
+	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 )
 
 // infoSuffix is the extension of tusd's per-Upload info file.
@@ -74,7 +75,7 @@ func NewKeeper(cfg KeeperConfig) *Keeper {
 func statfsFree(m mounts.Mount) (int64, error) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(m.Path, &st); err != nil {
-		return 0, fmt.Errorf("statfs: %w", scrubPath(err))
+		return 0, fmt.Errorf("statfs: %w", scrub.Path(err))
 	}
 	free := uint64(st.Bavail) * uint64(st.Bsize)
 	if free > math.MaxInt64 {
@@ -84,7 +85,9 @@ func statfsFree(m mounts.Mount) (int64, error) {
 }
 
 // admit refuses a new Upload of size bytes into m when the Mount's filesystem would be
-// left with less than the reserve. Only new Uploads are judged; one under way finishes.
+// left with less than the reserve once the Uploads already on their way have sent what
+// they still owe (free space only shrinks as bytes arrive). Only new Uploads are judged;
+// one under way finishes. Tusd refuses a deferred length, so every size is known.
 func (k *Keeper) admit(m mounts.Mount, size int64) error {
 	if k.cfg.Reserve <= 0 {
 		return nil
@@ -93,10 +96,46 @@ func (k *Keeper) admit(m mounts.Mount, size int64) error {
 	if err != nil {
 		return fmt.Errorf("free space: %w", err)
 	}
-	if free-k.cfg.Reserve < size {
+	owed, err := k.owed(m)
+	if err != nil {
+		return err
+	}
+	if free-k.cfg.Reserve-owed < size {
 		return errInsufficientSpace
 	}
 	return nil
+}
+
+// owed is the number of bytes the incomplete Uploads staged in m still have to send: for
+// each, its declared length minus what has arrived.
+func (k *Keeper) owed(m mounts.Mount) (int64, error) {
+	dir, err := stagingDir(m, false)
+	if err != nil {
+		return 0, nil // no Staging Area yet, so nothing is on its way
+	}
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, fmt.Errorf("list staging area: %w", scrub.Path(err))
+	}
+	var owed int64
+	for _, de := range ents {
+		id, isInfo := strings.CutSuffix(de.Name(), infoSuffix)
+		if !isInfo || !idRe.MatchString(id) || !de.Type().IsRegular() {
+			continue
+		}
+		var info struct{ Size int64 }
+		if b, err := os.ReadFile(filepath.Join(dir, de.Name())); err != nil || json.Unmarshal(b, &info) != nil {
+			continue // gone meanwhile, or damaged: it owes nothing we can count
+		}
+		var staged int64
+		if fi, err := os.Lstat(filepath.Join(dir, id)); err == nil {
+			staged = fi.Size()
+		}
+		if info.Size > staged {
+			owed += info.Size - staged
+		}
+	}
+	return owed, nil
 }
 
 // touch marks the Upload id in the Staging Area dir as active now, by the Keeper's
@@ -105,7 +144,7 @@ func (k *Keeper) touch(dir, id string) {
 	now := k.cfg.Clock.Now()
 	for _, name := range []string{id, id + infoSuffix} {
 		if err := os.Chtimes(filepath.Join(dir, name), now, now); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			k.cfg.Log.Error("touch staged upload", "err", scrubPath(err))
+			k.cfg.Log.Error("touch staged upload", "err", scrub.Path(err))
 		}
 	}
 }
@@ -129,7 +168,7 @@ func (k *Keeper) Sweep(ctx context.Context) {
 		}
 		ents, err := os.ReadDir(dir)
 		if err != nil {
-			k.cfg.Log.Error("expire uploads: list staging area", "mount", m.Name, "err", scrubPath(err))
+			k.cfg.Log.Error("expire uploads: list staging area", "mount", m.Name, "err", scrub.Path(err))
 			continue
 		}
 		ids := map[string]bool{}
@@ -185,20 +224,26 @@ func (k *Keeper) expireOne(m mounts.Mount, dir, id string) {
 		_ = json.Unmarshal(b, &info) // a damaged info still gets removed, just unattributed
 	}
 	var staged int64
+	landed := false // the data is also linked into place: only the staged name is left
 	if fi, err := os.Lstat(filepath.Join(dir, id)); err == nil {
 		staged = fi.Size()
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+			landed = st.Nlink > 1
+		}
 	}
 	ev := audit.Event{Operation: "upload_expire", User: info.MetaData[metaUser], Path: info.MetaData[metaPath], Bytes: staged, Outcome: audit.OK}
 	// Info first: once it is gone tusd no longer finds the Upload.
 	for _, name := range []string{id + infoSuffix, id} {
 		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			k.cfg.Log.Error("expire upload", "mount", m.Name, "id", id, "err", scrubPath(err))
+			k.cfg.Log.Error("expire upload", "mount", m.Name, "id", id, "err", scrub.Path(err))
 			ev.Outcome = audit.Failed
 		}
 	}
-	if ev.Outcome == audit.OK && info.Size > 0 && staged >= info.Size {
+	if ev.Outcome == audit.OK && landed {
 		return // a finished Upload's leftover staged name: housekeeping, not an expiry
 	}
+	// A complete Upload that never landed (it waited for a late Conflict to be settled)
+	// is an expiry like any other: its data is thrown away.
 	if k.cfg.Audit != nil {
 		k.cfg.Audit.Record(ev)
 	}

@@ -2,6 +2,8 @@ package resolver
 
 import (
 	"errors"
+	"fmt"
+	"path"
 	"strings"
 
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
@@ -55,6 +57,24 @@ func ValidateName(name string) (string, error) {
 func stem(name string) string {
 	stem, _, _ := strings.Cut(name, ".")
 	return strings.TrimRight(stem, " ")
+}
+
+// Numbered is the name for copy number n: name itself for n < 1, else "stem (n).ext"
+// with the number before the extension. Folders and dotfiles (".config") have no
+// extension, so the number goes at the end. It is the one rule for "keep both" Uploads
+// and for Trash entries whose name is taken.
+func Numbered(name string, n int, isDir bool) string {
+	if n < 1 {
+		return name
+	}
+	ext := ""
+	if !isDir {
+		ext = path.Ext(name)
+		if ext == name { // a dotfile has no extension
+			ext = ""
+		}
+	}
+	return fmt.Sprintf("%s (%d)%s", strings.TrimSuffix(name, ext), n, ext)
 }
 
 // JoinNew is Join for a name that will be created: it applies ValidateName.

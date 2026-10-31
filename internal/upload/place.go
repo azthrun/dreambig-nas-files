@@ -8,11 +8,11 @@ import (
 	"log/slog"
 	"os"
 	"path"
-	"strings"
 	"syscall"
 
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
 	"github.com/azthrun/dreambig-nas-files/internal/resolver"
+	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 	"github.com/azthrun/dreambig-nas-files/internal/trash"
 )
 
@@ -32,7 +32,17 @@ type Placement struct {
 	Staged string
 	// Choice is the User's Conflict choice from the Upload's metadata: "", ChoiceKeep or
 	// ChoiceReplace.
-	Choice string
+	Choice Choice
+	// Final, when not nil, receives the location the file really got, relative to
+	// Dest.Mount (it differs from Dest.Rel() when keep both chose "name (1).ext").
+	Final *string
+}
+
+// placedAt tells the caller where the file went.
+func (p Placement) placedAt(rel string) {
+	if p.Final != nil {
+		*p.Final = rel
+	}
 }
 
 // ErrConflictFolder means a folder stands at the Path. Only skip is possible then:
@@ -53,18 +63,24 @@ func (e replacedKept) Error() string {
 }
 func (e replacedKept) Is(target error) bool { return target == ErrConflict }
 
-// Conflict choices carried in Upload metadata. Skip is the User's alone: the browser just
-// does not upload, so it is never sent at creation; the resolve step accepts it.
+// Choice is how the User settled a Conflict. Keep and replace are carried in Upload metadata. Skip never is: a
+// skipped file is not uploaded, so it is only reported (see the package doc) and accepted
+// by the resolve step.
+type Choice string
+
 const (
-	ChoiceKeep    = "keep"
-	ChoiceReplace = "replace"
-	ChoiceSkip    = "skip"
+	ChoiceKeep    Choice = "keep"
+	ChoiceReplace Choice = "replace"
+	ChoiceSkip    Choice = "skip"
 )
 
+// known reports whether c is a choice that travels in Upload metadata (or is empty).
+func (c Choice) known() bool { return c == "" || c == ChoiceKeep || c == ChoiceReplace }
+
 // Placer is the completion seam. The default, ChoicePlacer, applies the User's Conflict
-// choice; LinkPlacer refuses an existing Path. #13 supplies one that also creates missing
-// parent folders. A Placer must never overwrite silently, and returns ErrConflict when it
-// declines. The caller removes the staged name afterwards.
+// choice; LinkPlacer refuses an existing Path. Missing parent folders are made before
+// the Placer runs (makeParents). A Placer must never overwrite silently, and returns
+// ErrConflict when it declines. The Handler removes the staged name afterwards.
 type Placer interface {
 	Place(ctx context.Context, p Placement) error
 }
@@ -81,7 +97,7 @@ func linkExclusive(root *os.Root, staged, rel string) error {
 		case errors.Is(err, fs.ErrNotExist):
 			return resolver.ErrNotFound // the parent folder vanished
 		}
-		return fmt.Errorf("link into place: %w", scrubPath(err))
+		return fmt.Errorf("link into place: %w", scrub.Path(err))
 	}
 	return nil
 }
@@ -102,6 +118,7 @@ func (LinkPlacer) Place(_ context.Context, p Placement) error {
 		}
 		return err
 	}
+	p.placedAt(p.Dest.Rel())
 	return nil
 }
 
@@ -142,37 +159,34 @@ func (c ChoicePlacer) Place(ctx context.Context, p Placement) error {
 	case "":
 		return LinkPlacer{}.Place(ctx, p)
 	case ChoiceKeep:
-		return c.keepBoth(root, p.Staged, rel)
+		return c.keepBoth(root, p, rel)
 	case ChoiceReplace:
 		return c.replace(root, p, rel)
 	}
 	return fmt.Errorf("unknown Conflict choice %q", p.Choice)
 }
 
-func (c ChoicePlacer) keepBoth(root *os.Root, staged, rel string) error {
+func (c ChoicePlacer) keepBoth(root *os.Root, p Placement, rel string) error {
 	if fi, err := root.Lstat(rel); err == nil && fi.IsDir() {
 		return ErrConflictFolder
 	}
 	for n := 0; n < maxKeepBoth; n++ {
-		err := linkExclusive(root, staged, numbered(rel, n))
+		name := numbered(rel, n)
+		err := linkExclusive(root, p.Staged, name)
 		if !errors.Is(err, errTaken) {
+			if err == nil {
+				p.placedAt(name)
+			}
 			return err
 		}
 	}
 	return ErrConflict
 }
 
-// numbered is rel for n == 0, else "stem (n).ext" in the same folder.
+// numbered is rel for n == 0, else the Numbered name in the same folder.
 func numbered(rel string, n int) string {
-	if n == 0 {
-		return rel
-	}
 	dir, name := path.Split(rel)
-	ext := path.Ext(name)
-	if ext == name { // a dotfile has no extension
-		ext = ""
-	}
-	return fmt.Sprintf("%s%s (%d)%s", dir, strings.TrimSuffix(name, ext), n, ext)
+	return dir + resolver.Numbered(name, n, false)
 }
 
 func (c ChoicePlacer) replace(root *os.Root, p Placement, rel string) error {
@@ -190,10 +204,11 @@ func (c ChoicePlacer) replace(root *os.Root, p Placement, rel string) error {
 				return fmt.Errorf("replace: %w", err)
 			}
 		case !errors.Is(err, fs.ErrNotExist):
-			return fmt.Errorf("replace: %w", scrubPath(err))
+			return fmt.Errorf("replace: %w", scrub.Path(err))
 		}
 		err = linkExclusive(root, p.Staged, rel)
 		if err == nil {
+			p.placedAt(rel)
 			return nil
 		}
 		if trashed == "" {
@@ -208,11 +223,11 @@ func (c ChoicePlacer) replace(root *os.Root, p Placement, rel string) error {
 		if rerr := root.Link(trashed, rel); rerr == nil {
 			rerr = root.Remove(trashed)
 			if rerr != nil && c.Log != nil {
-				c.Log.Error("replace: remove restored copy from the Trash", "err", scrubPath(rerr))
+				c.Log.Error("replace: remove restored copy from the Trash", "err", scrub.Path(rerr))
 			}
 		} else {
 			if c.Log != nil {
-				c.Log.Error("replace: restore the old file", "err", scrubPath(rerr))
+				c.Log.Error("replace: restore the old file", "err", scrub.Path(rerr))
 			}
 			return replacedKept{trash: trashed}
 		}
@@ -229,12 +244,3 @@ func takenIsConflict(err error) error {
 
 // stagedName is where Upload id's data waits, relative to its Mount.
 func stagedName(id string) string { return path.Join(mounts.StagingDir, id) }
-
-// scrubPath drops OS paths from link errors so they never reach a User.
-func scrubPath(err error) error {
-	var le *os.LinkError
-	if errors.As(err, &le) {
-		return le.Err
-	}
-	return err
-}

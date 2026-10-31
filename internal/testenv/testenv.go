@@ -41,6 +41,9 @@ type Env struct {
 	Handler http.Handler
 	users   map[string]string // name -> password
 	t       testing.TB
+
+	deps server.Deps         // what Restart rebuilds the application from
+	kc   upload.KeeperConfig // a restarted process has a fresh Keeper
 }
 
 // DefaultUser is a User every Env has.
@@ -212,9 +215,10 @@ func TryNew(t testing.TB, opts ...Option) (*Env, error) {
 	if s.trashDays != nil {
 		days = *s.trashDays
 	}
+	auditLog := audit.New(e.Audit, e.Clock) // one Logger, as in production
 	tr, err := trash.New(trash.Config{
 		Mounts: e.Mounts, Clock: e.Clock, RetentionDays: days,
-		Audit: audit.New(e.Audit, e.Clock),
+		Audit: auditLog,
 	})
 	if err != nil {
 		return nil, err
@@ -227,18 +231,40 @@ func TryNew(t testing.TB, opts ...Option) (*Env, error) {
 	}
 	kc := upload.KeeperConfig{
 		Mounts: e.Mounts, Clock: e.Clock, Expiry: expiry, Reserve: s.reserve,
-		Audit: audit.New(e.Audit, e.Clock),
+		Audit: auditLog,
 	}
 	if s.freeSpace != nil {
 		kc.FreeSpace = func(m mounts.Mount) (int64, error) { return s.freeSpace(m.Name), nil }
 	}
-	e.Uploads = upload.NewKeeper(kc)
-	h, err := server.New(server.Deps{Mounts: e.Mounts, Clock: e.Clock, Audit: e.Audit, Auth: auth, Access: acc, Trash: tr, Uploads: e.Uploads})
-	if err != nil {
+	e.kc = kc
+	e.deps = server.Deps{Mounts: e.Mounts, Clock: e.Clock, Audit: auditLog, Auth: auth, Access: acc, Trash: tr}
+	if err := e.Restart(); err != nil {
 		return nil, err
 	}
-	e.Handler = h
 	return e, nil
+}
+
+// Restart stops the application and starts it again on the same folders, as when the
+// container restarts: everything held in memory is gone (sessions, Upload locks, the
+// rate-limit table), everything on disk stays. Clients must sign in again.
+func (e *Env) Restart() error {
+	e.Uploads = upload.NewKeeper(e.kc)
+	d := e.deps
+	d.Uploads = e.Uploads
+	h, err := server.New(d)
+	if err != nil {
+		return err
+	}
+	e.Handler = h
+	return nil
+}
+
+// MustRestart is Restart that fails the test on error.
+func (e *Env) MustRestart() {
+	e.t.Helper()
+	if err := e.Restart(); err != nil {
+		e.t.Fatal(err)
+	}
 }
 
 // Get performs an unauthenticated GET and returns the recorded response.

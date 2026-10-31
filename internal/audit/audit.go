@@ -29,6 +29,9 @@ const (
 	Refused Outcome = "refused"
 	// Failed means it was allowed but went wrong.
 	Failed Outcome = "failed"
+	// Partial means it finished but left some things out (a zip that could not read
+	// every entry); Event.Omitted says how many.
+	Partial Outcome = "partial"
 )
 
 // Event is one auditable thing that happened. Empty fields are omitted from the line.
@@ -44,6 +47,12 @@ type Event struct {
 	Bytes  int64
 	// Choice is the Conflict choice the User made (skip, keep, replace), when there was one.
 	Choice string
+	// Requested is the Path the User asked for when the operation ended up at a different
+	// one (a kept-both Upload lands at "name (1).ext"); Path is where it really is. Empty
+	// when they are the same.
+	Requested string
+	// Omitted is how many entries a Partial operation left out.
+	Omitted int
 }
 
 type line struct {
@@ -55,6 +64,8 @@ type line struct {
 	Status    int     `json:"status,omitempty"`
 	Bytes     int64   `json:"bytes,omitempty"`
 	Choice    string  `json:"choice,omitempty"`
+	Requested string  `json:"requested,omitempty"`
+	Omitted   int     `json:"omitted,omitempty"`
 }
 
 // Logger writes audit lines. Safe for concurrent use.
@@ -81,6 +92,8 @@ func (l *Logger) Record(e Event) {
 		Status:    e.Status,
 		Bytes:     e.Bytes,
 		Choice:    e.Choice,
+		Requested: e.Requested,
+		Omitted:   e.Omitted,
 	})
 	if err != nil {
 		return // cannot happen for these field types

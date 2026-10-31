@@ -4,11 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"strings"
 	"syscall"
 
 	"github.com/azthrun/dreambig-nas-files/internal/resolver"
+	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 )
 
 // parentConflict is a file (or link) standing where a parent folder is needed. It is a
@@ -99,9 +99,5 @@ func mapMkdir(err error) error {
 	if strings.Contains(err.Error(), "escapes") {
 		return resolver.ErrOutsideRoot
 	}
-	var pe *os.PathError
-	if errors.As(err, &pe) {
-		err = pe.Err
-	}
-	return fmt.Errorf("create parent folder: %w", err)
+	return fmt.Errorf("create parent folder: %w", scrub.Path(err))
 }

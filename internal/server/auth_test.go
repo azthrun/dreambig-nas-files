@@ -220,7 +220,8 @@ func TestAuditNamesTheUserForSignInsAndRefusals(t *testing.T) {
 	type want struct{ user, op, outcome string }
 	var got []want
 	for _, l := range auditLines(t, e) {
-		got = append(got, want{l["user"].(string), l["operation"].(string), l["outcome"].(string)})
+		user, _ := l["user"].(string) // absent on a refusal before any sign-in
+		got = append(got, want{user, l["operation"].(string), l["outcome"].(string)})
 		if l["time"] == nil {
 			t.Errorf("line without time: %v", l)
 		}
@@ -230,6 +231,7 @@ func TestAuditNamesTheUserForSignInsAndRefusals(t *testing.T) {
 		{testenv.DefaultUser, "signin", "ok"},
 		{testenv.DefaultUser, "csrf", "refused"},
 		{testenv.DefaultUser, "signout", "ok"},
+		{"", "session", "refused"}, // the anonymous GET of the Root
 	}
 	if len(got) < len(exp) {
 		t.Fatalf("audit lines: %v", got)

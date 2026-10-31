@@ -1,10 +1,12 @@
 // Package trash is the Trash of each writable Mount (GLOSSARY.md): deleted and replaced
 // content moves to <Mount>/.nas-files-trash/<YYYY-MM-DD>/<original path in the Mount>
-// by an atomic rename inside the same filesystem, never overwriting a Trash entry, and
-// is purged after the retention period.
+// inside the same filesystem, never overwriting a Trash entry, and is purged after the
+// retention period. A folder is renamed; a file is hard-linked into the Trash and then
+// unlinked (rename would replace silently), falling back to a rename where the
+// filesystem cannot hard-link. Either way the content never leaves the Mount.
 //
 // Place is the one operation that puts something in the Trash; the delete handler and
-// the later "replace on Conflict" both use it.
+// "replace on Conflict" both use it.
 package trash
 
 import (
@@ -21,6 +23,8 @@ import (
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/clock"
 	"github.com/azthrun/dreambig-nas-files/internal/mounts"
+	"github.com/azthrun/dreambig-nas-files/internal/resolver"
+	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 )
 
 // Config is what a Trash needs from outside.
@@ -35,6 +39,9 @@ type Config struct {
 	Audit *audit.Logger
 	// Log receives operational logs; nil discards them.
 	Log *slog.Logger
+	// RemoveAll deletes a purged folder inside a Mount's os.Root; nil means
+	// root.RemoveAll. Tests substitute a slow one.
+	RemoveAll func(root *os.Root, rel string) error
 }
 
 // Trash places content in the Trash and purges it. Safe for concurrent use.
@@ -49,6 +56,9 @@ type Trash struct {
 
 // New opens a Trash over the Mounts. Close it when done.
 func New(cfg Config) (*Trash, error) {
+	if cfg.RemoveAll == nil {
+		cfg.RemoveAll = func(root *os.Root, rel string) error { return root.RemoveAll(rel) }
+	}
 	t := &Trash{cfg: cfg, roots: map[string]*os.Root{}, readOnly: map[string]bool{}}
 	for _, m := range cfg.Mounts {
 		root, err := os.OpenRoot(m.Path)
@@ -80,6 +90,25 @@ func (t *Trash) Close() error {
 // Mounts again, the Mount's top level, and anything Hidden (so the Trash cannot be
 // trashed into itself).
 func (t *Trash) Place(mount, rel string) (string, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.place(mount, rel)
+}
+
+// Locked runs fn holding the process-wide write lock, so a caller can combine a
+// placement with its own tree change (an Upload that replaces a file: Trash the old one,
+// then link the new one) without another delete or placement slipping in between. place
+// is Place without taking the lock again; fn must not call Place itself.
+func (t *Trash) Locked(fn func(place func(mount, rel string) (string, error)) error) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return fn(t.place)
+}
+
+// place is Place for a caller that holds t.mu. Right before the move it re-checks the
+// parent folder of rel: the caller resolved it earlier, and a symlink may have taken its
+// place since, so every folder above rel must still be a real folder, not a link.
+func (t *Trash) place(mount, rel string) (string, error) {
 	root, ok := t.roots[mount]
 	if !ok {
 		return "", ErrNoMount
@@ -90,50 +119,45 @@ func (t *Trash) Place(mount, rel string) (string, error) {
 	if !validRel(rel) {
 		return "", ErrInvalid
 	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.placeLocked(root, mount, rel)
-}
-
-// Locked runs fn holding the process-wide write lock, so a caller can combine a
-// placement with its own tree change (an Upload that replaces a file: Trash the old one,
-// then link the new one) without another delete or placement slipping in between. place
-// is Place without taking the lock again; fn must not call Place itself.
-func (t *Trash) Locked(fn func(place func(mount, rel string) (string, error)) error) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return fn(func(mount, rel string) (string, error) {
-		root, ok := t.roots[mount]
-		if !ok {
-			return "", ErrNoMount
-		}
-		if t.readOnly[mount] {
-			return "", ErrReadOnly
-		}
-		if !validRel(rel) {
-			return "", ErrInvalid
-		}
-		return t.placeLocked(root, mount, rel)
-	})
-}
-
-func (t *Trash) placeLocked(root *os.Root, mount, rel string) (string, error) {
+	if err := recheckParent(root, rel); err != nil {
+		return "", err
+	}
 	fi, err := root.Lstat(rel)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", ErrNotFound
 	}
 	if err != nil {
-		return "", fmt.Errorf("trash: %w", scrub(err))
+		return "", fmt.Errorf("trash: %w", scrub.Path(err))
 	}
 	dir, err := folders(root, path.Join(TrashDir, t.cfg.Clock.Now().Format("2006-01-02")), path.Dir(rel))
 	if err != nil {
-		return "", fmt.Errorf("trash: %w", scrub(err))
+		return "", fmt.Errorf("trash: %w", scrub.Path(err))
 	}
 	dest, err := moveNoReplace(root, rel, dir, path.Base(rel), fi.IsDir())
 	if err != nil {
-		return "", fmt.Errorf("trash: %w", scrub(err))
+		return "", fmt.Errorf("trash: %w", scrub.Path(err))
 	}
 	return dest, nil
+}
+
+// recheckParent walks the folders above rel, one level at a time, and refuses the move
+// (ErrInvalid) when one is a symlink or not a folder. A folder that has vanished is
+// ErrNotFound. Paths from the resolver are already fully resolved, so a link here means
+// the tree changed after the caller looked.
+func recheckParent(root *os.Root, rel string) error {
+	segs := strings.Split(rel, "/")
+	for i := 1; i < len(segs); i++ {
+		fi, err := root.Lstat(strings.Join(segs[:i], "/"))
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return ErrNotFound
+		case err != nil:
+			return fmt.Errorf("trash: %w", scrub.Path(err))
+		case !fi.IsDir():
+			return ErrInvalid // a link, or a file where a folder was
+		}
+	}
+	return nil
 }
 
 // validRel accepts a clean, relative, slash-separated path with no Hidden segment.
@@ -205,16 +229,15 @@ func ensureDir(root *os.Root, rel string) error {
 	return nil
 }
 
-// numbered is name for n == 1, else "stem (n).ext" (folders have no extension).
+// numbered is name for n == 1, else the Numbered name "stem (n).ext": the first taken
+// name gets (2), because the original counts as the first. (An Upload counts from 0:
+// its first try is the requested name, so the two callers differ only in this offset;
+// the naming rule itself is resolver.Numbered.)
 func numbered(name string, n int, isDir bool) string {
 	if n <= 1 {
 		return name
 	}
-	ext := ""
-	if !isDir {
-		ext = path.Ext(name)
-	}
-	return fmt.Sprintf("%s (%d)%s", strings.TrimSuffix(name, ext), n, ext)
+	return resolver.Numbered(name, n, isDir)
 }
 
 // moveNoReplace moves rel into dir under base (or a numbered variant) without ever
@@ -258,19 +281,6 @@ func noHardLinks(err error) bool {
 		}
 	}
 	return false
-}
-
-// scrub drops the OS path from path errors so errors never carry absolute NAS paths.
-func scrub(err error) error {
-	var pe *os.PathError
-	if errors.As(err, &pe) {
-		return pe.Err
-	}
-	var le *os.LinkError
-	if errors.As(err, &le) {
-		return le.Err
-	}
-	return err
 }
 
 // TrashDir is the Trash folder name inside a Mount.

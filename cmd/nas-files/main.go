@@ -81,9 +81,12 @@ func run(cfg config.Config, log *slog.Logger) error {
 		return err
 	}
 
+	// One Logger for every audit line, so the lines of concurrent writers never interleave.
+	auditLog := audit.New(os.Stdout, clock.Real{})
+
 	tr, err := trash.New(trash.Config{
 		Mounts: ms, Clock: clock.Real{}, RetentionDays: cfg.TrashRetentionDays,
-		Audit: audit.New(os.Stdout, clock.Real{}), Log: log,
+		Audit: auditLog, Log: log,
 	})
 	if err != nil {
 		return err
@@ -93,11 +96,11 @@ func run(cfg config.Config, log *slog.Logger) error {
 
 	keeper := upload.NewKeeper(upload.KeeperConfig{
 		Mounts: ms, Clock: clock.Real{}, Expiry: time.Duration(cfg.UploadExpiryDays) * 24 * time.Hour,
-		Reserve: cfg.FreeSpaceReserveBytes, Audit: audit.New(os.Stdout, clock.Real{}), Log: log,
+		Reserve: cfg.FreeSpaceReserveBytes, Audit: auditLog, Log: log,
 	})
 	go keeper.Run(ctx, uploadSweepInterval) // sweeps now (Uploads from earlier runs too); stops with ctx
 
-	handler, err := server.New(server.Deps{Mounts: ms, Auth: auth, Access: acc, Trash: tr, Uploads: keeper, Audit: os.Stdout, Log: log})
+	handler, err := server.New(server.Deps{Mounts: ms, Auth: auth, Access: acc, Trash: tr, Uploads: keeper, Audit: auditLog, Log: log})
 	if err != nil {
 		return err
 	}

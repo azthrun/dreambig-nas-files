@@ -32,28 +32,43 @@ func sessionOf(r *http.Request) *session {
 
 // protected wraps h so it only runs for a signed-in User, and, for any method other
 // than GET, HEAD and OPTIONS, only with a valid CSRF token (form field csrf_token or
-// header X-CSRF-Token). Every route except /healthz, sign-in and /static goes through
-// it, registered in routes.go. Each refusal is audited.
+// header X-CSRF-Token). Every route except /healthz, sign-in, /static and /lang goes
+// through it, registered in routes.go. Each refusal is audited.
 func (s *server) protected(h http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sess := s.currentSession(w, r)
 		if sess == nil {
 			if safeMethod(r.Method) {
+				s.audit.Record(audit.Event{Operation: "session", Path: requestedPath(r), Outcome: audit.Refused, Status: http.StatusSeeOther})
 				http.Redirect(w, r, "/login", http.StatusSeeOther)
 				return
 			}
-			s.audit.Record(audit.Event{Operation: "session", Outcome: audit.Refused, Status: http.StatusUnauthorized})
+			s.audit.Record(audit.Event{Operation: "session", Path: requestedPath(r), Outcome: audit.Refused, Status: http.StatusUnauthorized})
 			s.errorPage(w, r, http.StatusUnauthorized, "error.unauthorized")
 			return
 		}
 		if !safeMethod(r.Method) && !validCSRF(r, sess) {
-			s.audit.Record(audit.Event{User: sess.User, Operation: "csrf", Outcome: audit.Refused, Status: http.StatusForbidden})
+			s.audit.Record(audit.Event{User: sess.User, Operation: "csrf", Path: requestedPath(r), Outcome: audit.Refused, Status: http.StatusForbidden})
 			s.errorPage(w, r, http.StatusForbidden, "error.forbidden")
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
 		h(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, sess)))
 	})
+}
+
+// requestedPath is the Path a /files request names, for the audit line of a request that
+// was refused before any handler ran; empty for other routes and for a string that is
+// not a valid Path.
+func requestedPath(r *http.Request) string {
+	if !strings.HasPrefix(r.URL.Path, filesPrefix+"/") {
+		return ""
+	}
+	p, err := pathFromRequest(r)
+	if err != nil {
+		return ""
+	}
+	return p.String()
 }
 
 func safeMethod(m string) bool {
@@ -107,12 +122,12 @@ func (s *server) loginForm(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	name, password := r.PostFormValue("name"), r.PostFormValue("password")
-	userKey, ipKey := "user:"+name, "ip:"+clientIP(r)
+	keys := []string{userKey(name), ipKey(clientIP(r))}
 	fail := func(status int, key string) {
 		s.audit.Record(audit.Event{User: name, Operation: "signin", Outcome: audit.Refused, Status: status})
 		s.render(w, r, status, "login.html", page{Title: i18n.T(langOf(r), "signin.title"), Name: name, Error: i18n.T(langOf(r), key)})
 	}
-	if s.limiter.blocked(userKey, ipKey) {
+	if s.limiter.blocked(keys...) {
 		fail(http.StatusTooManyRequests, "signin.failed")
 		return
 	}
@@ -121,7 +136,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		if !errors.Is(err, identity.ErrInvalidCredentials) {
 			s.Log.Error("authenticate", "err", err)
 		}
-		s.limiter.fail(userKey, ipKey)
+		s.limiter.fail(keys...)
 		fail(http.StatusUnauthorized, "signin.failed")
 		return
 	}

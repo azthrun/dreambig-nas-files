@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/azthrun/dreambig-nas-files/internal/access"
 	"github.com/azthrun/dreambig-nas-files/internal/resolver"
@@ -9,20 +10,25 @@ import (
 
 // errForbidden is a User with Access to a Mount asking for more than they have (a write
 // with read Access, or any change to the Root or a Mount itself). Map it to 403 with
-// statusOf. A User with no Access never sees it: that is resolver.ErrNotFound (404).
+// refuse. A User with no Access never sees it: that is errNoAccess (404).
 var errForbidden = errors.New("not allowed")
+
+// errNoAccess is a User with no Access to the Mount asking for it. It is a not-found
+// (404, the response is identical to a missing Path) but, unlike a plain miss, it is
+// audited.
+var errNoAccess = fmt.Errorf("no Access: %w", resolver.ErrNotFound)
 
 // authorize is THE Access check: call it in every handler right after Resolve and before
 // any I/O or any other lookup. It judges the REAL target's Mount (loc.Mount, after
 // symlinks), so a link into a Mount the User cannot reach fails like a missing Path.
 //
-//   - need access.Read: browse, download, zip. No Access -> resolver.ErrNotFound.
+//   - need access.Read: browse, download, zip. No Access -> errNoAccess.
 //   - need access.Write: mkdir, Upload, delete, replace; loc is the thing being created,
 //     changed or removed (for Upload or mkdir, the new Path resolved with Exists false).
-//     No Access -> resolver.ErrNotFound; only read Access, a read-only Mount, or loc being
+//     No Access -> errNoAccess; only read Access, a read-only Mount, or loc being
 //     the Root or a Mount folder itself (top level is read-only) -> errForbidden.
 //
-// Handlers turn the error into a response with statusOf and the usual error page.
+// Handlers turn the error into a response with refuse.
 func (s *server) authorize(user string, loc resolver.Location, need access.Level) error {
 	if loc.IsRoot() {
 		if need >= access.Write {
@@ -33,7 +39,7 @@ func (s *server) authorize(user string, loc resolver.Location, need access.Level
 	have := s.Access.Level(user, loc.Mount)
 	switch {
 	case have < access.Read:
-		return resolver.ErrNotFound
+		return errNoAccess
 	case have < need, need >= access.Write && len(loc.Real) == 0:
 		return errForbidden
 	}
@@ -57,12 +63,4 @@ func (s *server) mountReadable(user, name string) bool {
 		}
 	}
 	return false
-}
-
-// statusOf maps resolver and Access errors to the HTTP status to send.
-func statusOf(err error) int {
-	if errors.Is(err, errForbidden) {
-		return 403
-	}
-	return resolver.Status(err)
 }

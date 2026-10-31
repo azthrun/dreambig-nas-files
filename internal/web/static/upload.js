@@ -48,7 +48,7 @@
   var active = 0;   // Uploads in flight
   var reading = 0;  // dropped folders still being read
   var skippedEmpty = 0;
-  // The User's "apply to all" Conflict choice for the rest of this batch: "", "skip",
+  // The User's "apply to all" Conflict choice for the rest of this selection: "", "skip",
   // "keep" or "replace".
   var allChoice = "";
   var askQueue = [];   // items waiting for the one Conflict dialog
@@ -147,6 +147,17 @@
 
   function skipped(it) { settle(it, "skipped", msg("skipped")); }
 
+  // reportSkip tells the server a file is not being sent, because no Upload exists yet to
+  // carry the choice. The file is skipped whether or not the report arrives.
+  function reportSkip(it) {
+    return fetch(endpoint + "skip", {
+      method: "POST",
+      headers: { "X-CSRF-Token": token, "Content-Type": "application/x-www-form-urlencoded" },
+      credentials: "same-origin",
+      body: "path=" + encodeURIComponent(dest + "/" + it.rel)
+    }).then(function () {}, function () {});
+  }
+
   // The dialog is shared by up to MAX_PARALLEL Uploads: one question at a time.
   function showNextAsk() {
     if (asking || askQueue.length === 0) { return; }
@@ -185,9 +196,11 @@
     showNextAsk();
   }
 
+  // The server hears every choice, so the audit log shows it: a late one by resolve
+  // (skip discards the kept data there), one made before any data was sent by /skip.
   function resolveLate(it, choice) {
-    if (choice === "skip") { it.upload.abort(true); skipped(it); return; }
-    setState(it, "running", msg("uploading"));
+    var skip = choice === "skip";
+    setState(it, "running", msg(skip ? "waiting" : "uploading"));
     fetch(it.upload.url + "/resolve?choice=" + encodeURIComponent(choice), {
       method: "POST",
       headers: { "X-CSRF-Token": token, "Tus-Resumable": "1.0.0" },
@@ -195,6 +208,7 @@
     }).then(function (res) {
       if (it.state === "cancelled") { return null; }
       if (res.status === 204) {
+        if (skip) { skipped(it); return null; }
         if (it.bar) { it.bar.value = 100; }
         settle(it, "done", msg("done"));
         return null;
@@ -220,7 +234,7 @@
     var text = body.indexOf("ERR_CONFLICT_TRASHED") >= 0 ? msg("conflict_trashed") : msg("conflict_prompt");
     chooseConflict(it, text, function (choice) {
       if (late) { resolveLate(it, choice); }
-      else if (choice === "skip") { skipped(it); }
+      else if (choice === "skip") { reportSkip(it).then(function () { skipped(it); }); }
       else { run(it, choice); }
     });
   }
@@ -350,8 +364,8 @@
     refreshTotal();
   }
 
-  // begin queues files and starts working. A new batch while one runs joins it.
-  function begin(batch, empty) {
+  // begin queues files and starts working. A new selection while one runs joins it.
+  function begin(picked, empty) {
     if (!startBtn.disabled) { // nothing running: start a fresh report
       items = [];
       cursor = 0;
@@ -359,7 +373,7 @@
       list.innerHTML = "";
     }
     skippedEmpty += empty || 0;
-    for (var i = 0; i < batch.length; i++) { add(batch[i].file, batch[i].rel, batch[i].error); }
+    for (var i = 0; i < picked.length; i++) { add(picked[i].file, picked[i].rel, picked[i].error); }
     if (items.length === 0) {
       status.textContent = skippedEmpty > 0 ? fmt(msg("empty_skipped"), [skippedEmpty]) : "";
       return;
@@ -374,15 +388,15 @@
 
   startBtn.addEventListener("click", function () {
     if (startBtn.disabled) { return; }
-    var batch = [], i, f;
+    var picked = [], i, f;
     var files = input.files || [];
-    for (i = 0; i < files.length; i++) { batch.push({ file: files[i], rel: files[i].name }); }
+    for (i = 0; i < files.length; i++) { picked.push({ file: files[i], rel: files[i].name }); }
     files = folderInput && folderInput.files ? folderInput.files : [];
     for (i = 0; i < files.length; i++) {
       f = files[i];
-      batch.push({ file: f, rel: f.webkitRelativePath || f.name });
+      picked.push({ file: f, rel: f.webkitRelativePath || f.name });
     }
-    begin(batch);
+    begin(picked);
   });
 
   function pick(choice) { return function () { if (asking && asking.onChoice) { asking.onChoice(choice); } }; }
@@ -409,9 +423,9 @@
     return new Promise(function (resolve, reject) {
       var all = [];
       (function page() {
-        reader.readEntries(function (batch) {
-          if (batch.length === 0) { resolve(all); return; }
-          for (var i = 0; i < batch.length; i++) { all.push(batch[i]); }
+        reader.readEntries(function (chunk) {
+          if (chunk.length === 0) { resolve(all); return; }
+          for (var i = 0; i < chunk.length; i++) { all.push(chunk[i]); }
           page();
         }, reject);
       })();

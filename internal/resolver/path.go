@@ -9,12 +9,11 @@
 //	... judge Access by loc.Mount ...                   // never by the first segment sent
 //	f, err := loc.Open()                                // I/O through the Mount's os.Root
 //
-// Errors wrap one of the sentinels below; Status maps them to HTTP in one place.
+// Errors wrap one of the sentinels below; the server maps them to HTTP in one place.
 package resolver
 
 import (
 	"errors"
-	"net/http"
 	"net/url"
 	"strings"
 	"unicode"
@@ -36,20 +35,6 @@ var (
 	// ErrNotFolder means a Path that must be a folder is something else.
 	ErrNotFolder = errors.New("not a folder")
 )
-
-// Status maps a resolver error to the HTTP status to send. Hidden Entries and escapes
-// look exactly like not-found (404) so nothing about them can be probed.
-func Status(err error) int {
-	switch {
-	case err == nil:
-		return http.StatusOK
-	case errors.Is(err, ErrInvalidPath), errors.Is(err, ErrInvalidName):
-		return http.StatusBadRequest
-	case errors.Is(err, ErrHidden), errors.Is(err, ErrOutsideRoot), errors.Is(err, ErrNotFound), errors.Is(err, ErrNotFolder):
-		return http.StatusNotFound
-	}
-	return http.StatusInternalServerError
-}
 
 // Path is a syntactically valid, NFC-normalised location relative to the Root: its first
 // segment is a Mount name. The zero Path is the Root itself. A Path proves nothing about

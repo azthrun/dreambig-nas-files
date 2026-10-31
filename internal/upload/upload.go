@@ -10,8 +10,12 @@
 //
 //	path      the destination Path relative to the Root ("docs/tax/2025.pdf"); required
 //	conflict  what to do if a file is at the Path: "keep" (next free "name (1).ext") or
-//	          "replace" (the old file goes to the Trash); absent means refuse. Skip is
-//	          never sent: the browser just does not upload.
+//	          "replace" (the old file goes to the Trash); absent means refuse.
+//
+// Skip is never Upload metadata, since a skipped file is not uploaded. The browser still
+// tells the server so the audit log shows the choice: POST /uploads/skip (form field
+// path) before any data is sent, POST /uploads/<id>/resolve?choice=skip for an Upload
+// whose data is already kept.
 //
 // Everything else the client sends is dropped. tusd's metadata is client-supplied, so the
 // path is parsed, resolved and Access-checked at creation and again at completion; the
@@ -25,9 +29,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"path"
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/tus/tusd/v2/pkg/handler"
 	expslog "golang.org/x/exp/slog"
@@ -95,11 +99,6 @@ type Handler struct {
 	Config
 	store *store
 	tus   *handler.UnroutedHandler
-
-	// pending holds Uploads whose data is complete but waits for the User to settle a
-	// late Conflict (see preFinish). In memory: after a restart the User uploads again.
-	pmu     sync.Mutex
-	pending map[string]bool
 }
 
 // New builds a Handler.
@@ -113,7 +112,7 @@ func New(cfg Config) (*Handler, error) {
 	if cfg.Keeper == nil {
 		cfg.Keeper = NewKeeper(KeeperConfig{Mounts: cfg.Mounts, Audit: cfg.Audit, Log: cfg.Log})
 	}
-	h := &Handler{Config: cfg, store: newStore(cfg.Mounts, cfg.Log, cfg.Keeper), pending: map[string]bool{}}
+	h := &Handler{Config: cfg, store: newStore(cfg.Mounts, cfg.Log, cfg.Keeper)}
 
 	composer := handler.NewStoreComposer()
 	composer.UseCore(h.store)
@@ -150,8 +149,9 @@ type reqState struct {
 	completed bool
 	size      int64
 	denied    bool // somebody else's Upload
-	choice    string
+	choice    Choice
 	op        string // audit operation, when not the usual one for the method
+	requested string // the Path asked for, when the file landed at another one
 }
 
 func stateOf(ctx context.Context) *reqState {
@@ -180,6 +180,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, user string)
 		r2.Body = body
 	}
 	switch {
+	case id == "skip": // not an Upload: the User's report that a file is not being sent
+		h.skip(rec, r2, st)
 	case id != "" && !idRe.MatchString(id):
 		writeTusError(rec, errNoUpload)
 	case id == "" && resolve:
@@ -199,6 +201,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, user string)
 	h.record(r.Method, rec.status, st, body.n)
 }
 
+// owned loads Upload id for the User of the request. To anyone else an Upload does not
+// exist. It also fills in the Path the audit line will name.
+func (h *Handler) owned(ctx context.Context, id string, st *reqState) (handler.Upload, handler.FileInfo, error) {
+	u, err := h.store.GetUpload(ctx, id)
+	if err != nil {
+		return nil, handler.FileInfo{}, errNoUpload
+	}
+	info, err := u.GetInfo(ctx)
+	if err != nil || info.MetaData[metaUser] != st.user {
+		st.denied = true
+		return nil, handler.FileInfo{}, errNoUpload
+	}
+	if p, err := resolver.Parse(info.MetaData[metaPath]); err == nil {
+		st.path = p.String()
+	}
+	return u, info, nil
+}
+
 // item serves HEAD, PATCH and DELETE of one Upload, for its creator only. To anyone else
 // an Upload does not exist.
 func (h *Handler) item(w http.ResponseWriter, r *http.Request, id string, st *reqState) {
@@ -215,46 +235,27 @@ func (h *Handler) item(w http.ResponseWriter, r *http.Request, id string, st *re
 		writeTusError(w, errMethod)
 		return
 	}
-	u, err := h.store.GetUpload(r.Context(), id)
+	_, info, err := h.owned(r.Context(), id, st)
 	if err != nil {
-		writeTusError(w, errNoUpload)
+		writeTusError(w, err)
 		return
 	}
-	info, err := u.GetInfo(r.Context())
-	if err != nil || info.MetaData[metaUser] != st.user {
-		st.denied = true
-		writeTusError(w, errNoUpload)
-		return
-	}
-	if p, err := resolver.Parse(info.MetaData[metaPath]); err == nil {
-		st.path = p.String()
-	}
-	if r.Method == http.MethodHead && h.isPending(id) {
+	if r.Method == http.MethodHead && pending(info) {
 		// Its data is complete but it never landed. A client that saw "complete" would
 		// report success, so until the User settles the Conflict it does not resume.
 		writeTusError(w, errNoUpload)
 		return
 	}
-	if r.Method == http.MethodDelete {
-		h.setPending(id, false)
-	}
 	serve(w, r)
 }
 
-func (h *Handler) isPending(id string) bool {
-	h.pmu.Lock()
-	defer h.pmu.Unlock()
-	return h.pending[id]
-}
-
-func (h *Handler) setPending(id string, on bool) {
-	h.pmu.Lock()
-	defer h.pmu.Unlock()
-	if on {
-		h.pending[id] = true
-	} else {
-		delete(h.pending, id)
-	}
+// pending reports an Upload that is waiting for the User to settle a late Conflict (see
+// preFinish): all of its data is staged, yet it was not placed. A finished Upload is
+// removed from the Staging Area at once, so one that is still there and complete can only
+// be waiting. Deriving this from the staged data, rather than remembering it in memory,
+// keeps the Upload waiting across a restart.
+func pending(info handler.FileInfo) bool {
+	return !info.SizeIsDeferred && info.Offset == info.Size
 }
 
 // resolve settles a late Conflict: POST /uploads/<id>/resolve?choice=skip|keep|replace.
@@ -268,25 +269,28 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request, id string, st 
 		return
 	}
 	ctx := r.Context()
-	u, err := h.store.GetUpload(ctx, id)
+	// One request at a time settles an Upload: two clicks must not place the file twice.
+	// A holder is never asked to let go (the no-op), the second request waits its turn and
+	// then finds the Upload gone.
+	lock, err := h.Keeper.locker.NewLock(id)
+	if err == nil {
+		err = lock.Lock(ctx, func() {})
+	}
 	if err != nil {
+		writeTusError(w, errInternal)
+		return
+	}
+	defer func() { _ = lock.Unlock() }()
+	u, info, err := h.owned(ctx, id, st)
+	if err != nil {
+		writeTusError(w, err)
+		return
+	}
+	if !pending(info) {
 		writeTusError(w, errNoUpload)
 		return
 	}
-	info, err := u.GetInfo(ctx)
-	if err != nil || info.MetaData[metaUser] != st.user {
-		st.denied = true
-		writeTusError(w, errNoUpload)
-		return
-	}
-	if p, err := resolver.Parse(info.MetaData[metaPath]); err == nil {
-		st.path = p.String()
-	}
-	if !h.isPending(id) {
-		writeTusError(w, errNoUpload)
-		return
-	}
-	choice := r.URL.Query().Get("choice")
+	choice := Choice(r.URL.Query().Get("choice"))
 	st.choice = choice
 	switch choice {
 	case ChoiceSkip:
@@ -296,7 +300,6 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request, id string, st 
 			writeTusError(w, errInternal)
 			return
 		}
-		h.setPending(id, false)
 		w.Header().Set("Tus-Resumable", "1.0.0")
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -307,13 +310,32 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request, id string, st 
 	}
 	st.op = "upload"
 	if err := h.complete(ctx, st, u, info, choice); err != nil {
-		if !isConflict(err) {
-			h.setPending(id, false)
-		}
 		writeTusError(w, h.tusError(ctx, err))
 		return
 	}
-	h.setPending(id, false)
+	w.Header().Set("Tus-Resumable", "1.0.0")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// skip records the User's choice to skip a file at its Path before any data is sent:
+// POST /uploads/skip with the form field path. No Upload exists then, so the browser
+// reports it here and the audit log still shows the choice. The Path is held to the same
+// rules as an Upload's (it must be writable by this User), but nothing is created.
+func (h *Handler) skip(w http.ResponseWriter, r *http.Request, st *reqState) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		writeTusError(w, errMethod)
+		return
+	}
+	st.op, st.choice = "upload_skip", ChoiceSkip
+	p, _, err := h.destination(st.user, r.PostFormValue("path"))
+	if err == nil || !errors.Is(err, resolver.ErrInvalidPath) {
+		st.path = p.String()
+	}
+	if err != nil {
+		writeTusError(w, h.tusError(r.Context(), err))
+		return
+	}
 	w.Header().Set("Tus-Resumable", "1.0.0")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -330,7 +352,7 @@ func isConflict(err error) bool {
 // record writes the audit line for a finished request: creation, completion, cancel, and
 // every refusal or failure. Progress PATCHes and routine HEADs are not audited.
 func (h *Handler) record(method string, status int, st *reqState, bytes int64) {
-	ev := audit.Event{User: st.user, Path: st.path, Status: status, Choice: st.choice}
+	ev := audit.Event{User: st.user, Path: st.path, Status: status, Choice: string(st.choice), Requested: st.requested}
 	switch {
 	case status == http.StatusInsufficientStorage:
 		ev.Outcome = audit.Refused // the reserve said no; nothing broke
@@ -368,12 +390,10 @@ func (h *Handler) record(method string, status int, st *reqState, bytes int64) {
 	h.Audit.Record(ev)
 }
 
-// check validates a destination the client named and returns where it would land. It is
-// run at creation and again at completion: parse, name rules, resolve, Access, and the
-// Conflict and parent-folder checks. Missing parent folders are allowed (Folder Uploads
-// create them at completion) but every name to be created must pass the name rules.
-// A non-empty choice lets an existing file stand: the Placer applies it.
-func (h *Handler) check(user, raw, choice string) (resolver.Path, resolver.Location, error) {
+// destination validates the Path a client named for a file and returns where it would
+// land: parse, name rules, resolve, Access, and a Mount that has a Staging Area. It says
+// nothing about what is at the Path.
+func (h *Handler) destination(user, raw string) (resolver.Path, resolver.Location, error) {
 	p, err := resolver.Parse(raw)
 	if err != nil {
 		return resolver.Path{}, resolver.Location{}, err
@@ -393,6 +413,19 @@ func (h *Handler) check(user, raw, choice string) (resolver.Path, resolver.Locat
 	}
 	if _, ok := h.store.mounts[loc.Mount.Name]; !ok {
 		return p, loc, resolver.ErrNotFound // a read-only Mount has no Staging Area
+	}
+	return p, loc, nil
+}
+
+// check validates a destination the client named and returns where it would land. It is
+// run at creation and again at completion: destination, then the Conflict and
+// parent-folder checks. Missing parent folders are allowed (Folder Uploads create them at
+// completion) but every name to be created must pass the name rules. A non-empty choice
+// lets an existing file stand: the Placer applies it.
+func (h *Handler) check(user, raw string, choice Choice) (resolver.Path, resolver.Location, error) {
+	p, loc, err := h.destination(user, raw)
+	if err != nil {
+		return p, loc, err
 	}
 	if loc.Exists {
 		// Replace and keep both apply to files only; whatever is not a file is a folder
@@ -416,9 +449,9 @@ func (h *Handler) check(user, raw, choice string) (resolver.Path, resolver.Locat
 // choice only if it is one of the known ones.
 func (h *Handler) preCreate(ev handler.HookEvent) (handler.HTTPResponse, handler.FileInfoChanges, error) {
 	st := stateOf(ev.Context)
-	choice := ev.Upload.MetaData[metaConflict]
+	choice := Choice(ev.Upload.MetaData[metaConflict])
 	st.choice = choice
-	if choice != "" && choice != ChoiceKeep && choice != ChoiceReplace {
+	if !choice.known() {
 		return handler.HTTPResponse{}, handler.FileInfoChanges{}, errBadChoice
 	}
 	p, loc, err := h.check(st.user, ev.Upload.MetaData[metaPath], choice)
@@ -428,14 +461,14 @@ func (h *Handler) preCreate(ev handler.HookEvent) (handler.HTTPResponse, handler
 	if err != nil {
 		return handler.HTTPResponse{}, handler.FileInfoChanges{}, h.tusError(ev.Context, err)
 	}
-	// Only a new Upload is judged against the free-space reserve (a deferred length
-	// counts as 0); Uploads under way are never refused.
+	// Only a new Upload is judged against the free-space reserve; Uploads under way
+	// are never refused.
 	if err := h.Keeper.admit(loc.Mount, ev.Upload.Size); err != nil {
 		return handler.HTTPResponse{}, handler.FileInfoChanges{}, h.tusError(ev.Context, err)
 	}
 	md := handler.MetaData{metaPath: p.String(), metaUser: st.user, metaMount: loc.Mount.Name}
 	if choice != "" {
-		md[metaConflict] = choice
+		md[metaConflict] = string(choice)
 	}
 	return handler.HTTPResponse{}, handler.FileInfoChanges{MetaData: md}, nil
 }
@@ -451,13 +484,15 @@ func (h *Handler) preFinish(ev handler.HookEvent) (handler.HTTPResponse, error) 
 	if err != nil {
 		return handler.HTTPResponse{}, err
 	}
-	choice := ev.Upload.MetaData[metaConflict]
+	choice := Choice(ev.Upload.MetaData[metaConflict])
 	st.choice = choice
 	if err := h.complete(ctx, st, u, ev.Upload, choice); err != nil {
-		if isConflict(err) {
-			h.setPending(ev.Upload.ID, true)
-		} else if terr := h.store.AsTerminatableUpload(u).Terminate(ctx); terr != nil {
-			h.Log.ErrorContext(ctx, "discard staged upload", "id", ev.Upload.ID, "err", terr)
+		// On a Conflict the data simply stays: complete and still staged is what
+		// "waiting for the User" means (see pending).
+		if !isConflict(err) {
+			if terr := h.store.AsTerminatableUpload(u).Terminate(ctx); terr != nil {
+				h.Log.ErrorContext(ctx, "discard staged upload", "id", ev.Upload.ID, "err", terr)
+			}
 		}
 		return handler.HTTPResponse{}, h.tusError(ctx, err)
 	}
@@ -466,7 +501,7 @@ func (h *Handler) preFinish(ev handler.HookEvent) (handler.HTTPResponse, error) 
 
 // complete re-checks a finished Upload, places it with choice and removes its staged
 // name. On error nothing has been done to the staged data.
-func (h *Handler) complete(ctx context.Context, st *reqState, u handler.Upload, info handler.FileInfo, choice string) error {
+func (h *Handler) complete(ctx context.Context, st *reqState, u handler.Upload, info handler.FileInfo, choice Choice) error {
 	p, loc, err := h.check(st.user, info.MetaData[metaPath], choice)
 	if err == nil && (info.MetaData[metaUser] != st.user || loc.Mount.Name != info.MetaData[metaMount]) {
 		err = resolver.ErrNotFound // the Path now leads into another Mount
@@ -491,8 +526,14 @@ func (h *Handler) complete(ctx context.Context, st *reqState, u handler.Upload, 
 	if err != nil {
 		return err
 	}
-	if err := h.Place.Place(ctx, Placement{User: st.user, Dest: loc, Staged: stagedName(info.ID), Choice: choice}); err != nil {
+	final := loc.Rel()
+	if err := h.Place.Place(ctx, Placement{User: st.user, Dest: loc, Staged: stagedName(info.ID), Choice: choice, Final: &final}); err != nil {
 		return err
+	}
+	if final != loc.Rel() { // keep both: the audit line names where the file is
+		if landed, err := p.Parent().Join(path.Base(final)); err == nil {
+			st.requested, st.path = p.String(), landed.String()
+		}
 	}
 	// The file is in place; failing to drop the staged name only leaves a link for expiry.
 	if err := h.store.AsTerminatableUpload(u).Terminate(ctx); err != nil {

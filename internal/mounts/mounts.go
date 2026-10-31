@@ -5,6 +5,8 @@ package mounts
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +17,8 @@ import (
 	"syscall"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 )
 
 // Mount is one validated Mount.
@@ -36,13 +40,16 @@ type Options struct {
 	// RequireMountPoints refuses a folder that is not its own mount point. Keep it on
 	// in production; temp folders in tests share a filesystem and need it off.
 	RequireMountPoints bool
+	// Link makes a hard link (new pointing at old); nil means os.Link. Tests substitute
+	// one that fails, standing in for a filesystem without hard links.
+	Link func(old, new string) error
 }
 
 // Discover validates every entry under root and returns the Mounts sorted by name.
 func Discover(root string, opts Options) ([]Mount, error) {
 	rootInfo, err := os.Stat(root)
 	if err != nil {
-		return nil, fmt.Errorf("data directory: %w", scrub(err))
+		return nil, fmt.Errorf("data directory: %w", scrub.Path(err))
 	}
 	rootDev, ok := deviceOf(rootInfo)
 	if !ok {
@@ -50,7 +57,7 @@ func Discover(root string, opts Options) ([]Mount, error) {
 	}
 	entries, err := os.ReadDir(root) // sorted by file name
 	if err != nil {
-		return nil, fmt.Errorf("data directory: %w", scrub(err))
+		return nil, fmt.Errorf("data directory: %w", scrub.Path(err))
 	}
 	slices.SortFunc(entries, func(a, b os.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
 
@@ -61,7 +68,7 @@ func Discover(root string, opts Options) ([]Mount, error) {
 		path := filepath.Join(root, name)
 		info, err := os.Lstat(path)
 		if err != nil {
-			return nil, fmt.Errorf("Mount %q: %w", name, scrub(err))
+			return nil, fmt.Errorf("Mount %q: %w", name, scrub.Path(err))
 		}
 		if !info.IsDir() {
 			return nil, fmt.Errorf("Mount %q: not a folder; every entry under the data directory must be a Mount declared by a compose volume line", name)
@@ -80,7 +87,7 @@ func Discover(root string, opts Options) ([]Mount, error) {
 
 		real, err := filepath.EvalSymlinks(path)
 		if err != nil {
-			return nil, fmt.Errorf("Mount %q: %w", name, scrub(err))
+			return nil, fmt.Errorf("Mount %q: %w", name, scrub.Path(err))
 		}
 		if err := unix.Access(real, unix.R_OK|unix.X_OK); err != nil {
 			return nil, fmt.Errorf("Mount %q: not readable by the service's user; grant it Read access in DSM", name)
@@ -91,6 +98,8 @@ func Discover(root string, opts Options) ([]Mount, error) {
 			if !errors.Is(werr, unix.EROFS) && !mountedReadOnly(real) {
 				m.Warning = fmt.Sprintf("Mount %q is not writable by the service's user, so it is read-only; mount it :ro or grant the user Read/Write in DSM", name)
 			}
+		} else if err := probeHardLinks(real, opts.Link); err != nil {
+			return nil, fmt.Errorf("Mount %q: %w", name, err)
 		}
 		out = append(out, m)
 	}
@@ -100,14 +109,45 @@ func Discover(root string, opts Options) ([]Mount, error) {
 	return out, nil
 }
 
-// scrub drops the OS path from a *PathError so startup errors name only what the owner
-// configured.
-func scrub(err error) error {
-	var pe *os.PathError
-	if errors.As(err, &pe) {
-		return pe.Err
+// probeHardLinks checks that Uploads can complete in the writable Mount at dir: an
+// Upload waits in the Staging Area and is hard-linked into place, so a filesystem that
+// cannot link would fail every Upload after its data had travelled. It links a file from
+// the Staging Area into the Mount's own folder and removes everything it made, including
+// the Staging Area when it had to create it.
+func probeHardLinks(dir string, link func(old, new string) error) (err error) {
+	if link == nil {
+		link = os.Link
 	}
-	return err
+	staging := filepath.Join(dir, StagingDir)
+	created := false
+	if merr := os.Mkdir(staging, 0o700); merr == nil {
+		created = true
+	} else if !errors.Is(merr, os.ErrExist) {
+		return fmt.Errorf("cannot create its Staging Area: %w", scrub.Path(merr))
+	}
+	if fi, lerr := os.Lstat(staging); lerr != nil || !fi.IsDir() {
+		return errors.New("its Staging Area is not a folder; remove it from the Mount")
+	}
+	var tag [8]byte
+	if _, rerr := rand.Read(tag[:]); rerr != nil {
+		return fmt.Errorf("probe hard links: %w", rerr)
+	}
+	src := filepath.Join(staging, "probe-"+hex.EncodeToString(tag[:]))
+	dst := filepath.Join(dir, ".nas-files-probe-"+hex.EncodeToString(tag[:]))
+	defer func() {
+		_ = os.Remove(dst)
+		_ = os.Remove(src)
+		if created {
+			_ = os.Remove(staging) // only if empty, which it is unless somebody else just used it
+		}
+	}()
+	if werr := os.WriteFile(src, nil, 0o600); werr != nil {
+		return fmt.Errorf("cannot write to its Staging Area: %w", scrub.Path(werr))
+	}
+	if lerr := link(src, dst); lerr != nil {
+		return fmt.Errorf("the filesystem does not support hard links, which Uploads use to complete without overwriting a file: %w", scrub.Path(lerr))
+	}
+	return nil
 }
 
 func deviceOf(info os.FileInfo) (uint64, bool) {

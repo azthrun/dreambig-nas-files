@@ -8,6 +8,7 @@ Go. Read `GLOSSARY.md` and `docs/adr/` first. Code from the sibling services is 
 - `internal/config`: the only package that reads the environment.
 - `internal/mounts`: Mount discovery and validation, Hidden Entry names.
 - `internal/server`: routes, middleware, handlers. `routes.go` is the one place routes are registered.
+- `internal/scrub`: the one helper that drops OS paths from errors (`scrub.Path`). Wrap every `os` error in it before it leaves a package.
 - `internal/clock`: the only source of time. Never call `time.Now()` elsewhere.
 - `internal/testenv`: test support that builds the whole app around temp Mounts. Production code must not import it.
 - New modules from the spec (path resolver, identity, access, listing, download, uploads, trash, audit, i18n) each get their own `internal/<name>` package.
@@ -18,14 +19,14 @@ Go. Read `GLOSSARY.md` and `docs/adr/` first. Code from the sibling services is 
 - Judge Access by the real target's Mount after symlink resolution, never by the first segment as sent. Check Hidden Entries after resolution too.
 - Hidden Entries (`@*`, `#*`, `.DS_Store`, Staging Area, `.nas-files-trash`, `.nas-mcp-trash`) are never listed and look like not-found. An inaccessible Mount behaves as nonexistent (404, not 403).
 - Use `os.Root` (one per Mount) for I/O after validation.
-- Never destroy data. Delete and replace move to the Mount's Trash by atomic same-filesystem rename, never overwriting a Trash entry. Only Staging Area data, Trash purge and zero-length temp files may be removed.
+- Never destroy data. Delete and replace move to the Mount's Trash inside the same filesystem (rename for folders, link then unlink for files, since rename would replace), never overwriting a Trash entry. Only Staging Area data, Trash purge and zero-length temp files may be removed.
 - Never overwrite silently. Complete Uploads with a create-exclusive hard link; `rename` would replace.
 - The top level (Root and the Mounts themselves) is read-only. A read-only Mount refuses every change for every User.
 - Serialise tree changes (Trash placement, purge, delete) with one process-wide `sync.Mutex`; re-check the resolved parent right before the rename.
 
 ## HTTP and security
 
-- Only `/healthz` and sign-in are unauthenticated. Register every other route behind the session middleware. Every write, including tus requests, needs a CSRF token.
+- Only `/healthz`, sign-in, `/static` and `/lang/<code>` are unauthenticated: static assets and the language switch hold no file data, and the sign-in page needs both. Register every other route behind the session middleware. Every write, including tus requests, needs a CSRF token.
 - Session cookie: HttpOnly, SameSite=Lax, not Secure (ADR-0002). Nothing may need a secure context.
 - Compare secrets with `crypto/subtle`. Passwords are bcrypt only.
 - Errors never echo absolute NAS paths or secrets. Map sentinel errors to HTTP statuses in one place.

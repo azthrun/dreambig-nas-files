@@ -4,25 +4,55 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"os"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
 )
+
+// purgingSuffix marks a Trash folder that was set aside to be removed. A crash can leave
+// one behind; the next purge finishes it.
+const purgingSuffix = ".purging"
 
 // Purge removes every dated Trash folder that is older than the retention, in every
 // writable Mount. Age is the folder's date, not its mtime (a rename keeps the old mtime).
 // A folder dated d is purged once today is more than RetentionDays after d. With
 // RetentionDays 0 nothing is ever purged. Each purged folder, and each failure, is one
 // audit line (operation "trash_purge"); Purge never panics or returns an error.
+//
+// A big folder can take minutes to remove, so the write lock is held only to set the
+// expired folders aside (a rename); the removal runs without it and deletes are not held
+// up. A set-aside folder is no longer a dated one, so nothing is placed into it.
 func (t *Trash) Purge() {
 	if t.cfg.RetentionDays <= 0 {
 		return
 	}
+	for _, a := range t.setAside() {
+		outcome := audit.OK
+		if err := t.cfg.RemoveAll(a.root, a.aside); err != nil {
+			outcome = audit.Failed
+		}
+		t.record(a.mount, a.orig, outcome)
+	}
+}
+
+// aside is one expired Trash folder that was set aside for removal.
+type aside struct {
+	mount string
+	root  *os.Root
+	orig  string // where it was: TrashDir/<date>
+	aside string // where it is now: orig + purgingSuffix
+}
+
+// setAside renames every expired dated folder to its set-aside name, under the write
+// lock, and returns them together with the leftovers of an earlier run.
+func (t *Trash) setAside() []aside {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	now := t.cfg.Clock.Now()
-	today := dateOnly(now)
+	today := dateOnly(t.cfg.Clock.Now())
+	var out []aside
 	for _, m := range t.cfg.Mounts {
 		root, ok := t.roots[m.Name]
 		if !ok || t.readOnly[m.Name] {
@@ -43,21 +73,31 @@ func (t *Trash) Purge() {
 			continue
 		}
 		for _, de := range des {
-			d, err := time.Parse("2006-01-02", de.Name())
-			if err != nil || !de.IsDir() { // only dated folders are ours to purge
+			if !de.IsDir() { // only dated folders are ours to purge
 				continue
 			}
-			if int(today.Sub(d).Hours()/24) <= t.cfg.RetentionDays {
+			name := de.Name()
+			if date, left := strings.CutSuffix(name, purgingSuffix); left {
+				if _, err := time.Parse("2006-01-02", date); err == nil {
+					orig := path.Join(TrashDir, date)
+					out = append(out, aside{m.Name, root, orig, path.Join(TrashDir, name)})
+				}
 				continue
 			}
-			rel := path.Join(TrashDir, de.Name())
-			outcome := audit.OK
-			if err := root.RemoveAll(rel); err != nil {
-				outcome = audit.Failed
+			d, err := time.Parse("2006-01-02", name)
+			if err != nil || int(today.Sub(d).Hours()/24) <= t.cfg.RetentionDays {
+				continue
 			}
-			t.record(m.Name, rel, outcome)
+			orig := path.Join(TrashDir, name)
+			moved := orig + purgingSuffix
+			if err := root.Rename(orig, moved); err != nil {
+				t.record(m.Name, orig, audit.Failed)
+				continue
+			}
+			out = append(out, aside{m.Name, root, orig, moved})
 		}
 	}
+	return out
 }
 
 // dateOnly is t's calendar date as midnight UTC, so day counts ignore time zones and DST.

@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/azthrun/dreambig-nas-files/internal/scrub"
 )
 
 // ErrInvalidCredentials is returned for an unknown name or a wrong password alike.
@@ -39,7 +41,7 @@ type Htpasswd struct {
 func Load(path string) (*Htpasswd, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("users file: %w", err)
+		return nil, fmt.Errorf("users file: %w", scrub.Path(err))
 	}
 	defer f.Close()
 	h, err := Parse(f)

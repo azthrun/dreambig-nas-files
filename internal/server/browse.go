@@ -1,7 +1,6 @@
 package server
 
 import (
-	"errors"
 	"io/fs"
 	"net/http"
 	"slices"
@@ -9,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/azthrun/dreambig-nas-files/internal/access"
-	"github.com/azthrun/dreambig-nas-files/internal/audit"
 	"github.com/azthrun/dreambig-nas-files/internal/i18n"
 	"github.com/azthrun/dreambig-nas-files/internal/listing"
 	"github.com/azthrun/dreambig-nas-files/internal/resolver"
@@ -170,25 +168,7 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) refuseBrowse(w http.ResponseWriter, r *http.Request, user string, p resolver.Path, err error) {
-	status := resolver.Status(err)
-	if status == http.StatusInternalServerError {
-		s.Log.Error("browse", "err", err)
-		s.errorPage(w, r, status, "error.internal")
-		return
-	}
-	ev := audit.Event{User: user, Operation: "browse", Outcome: audit.Refused, Status: status}
-	if !errors.Is(err, resolver.ErrInvalidPath) {
-		ev.Path = p.String() // only a syntactically valid Path is ever recorded
-	}
-	// Plain not-found is routine and not audited; refusals (invalid, hidden, escape) are.
-	if !(errors.Is(err, resolver.ErrNotFound) || errors.Is(err, resolver.ErrNotFolder)) {
-		s.audit.Record(ev)
-	}
-	key := "error.not_found"
-	if status == http.StatusBadRequest {
-		key = "error.bad_path"
-	}
-	s.errorPage(w, r, status, key)
+	s.refuse(w, r, "browse", user, p.String(), err, true)
 }
 
 // crumbsFor builds the breadcrumb trail: Files > mount > folder > ... The last crumb is
