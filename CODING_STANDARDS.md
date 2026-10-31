@@ -25,7 +25,7 @@ Go. Read `GLOSSARY.md` and `docs/adr/` first. Code from the sibling services is 
 
 ## HTTP and security
 
-- Only `/healthz` and sign-in are unauthenticated. Register every other route behind the session middleware. Every write, including tus requests, needs a CSRF token.
+- Only `/healthz`, sign-in, `/static` and `/lang/<code>` are unauthenticated: static assets and the language switch hold no file data, and the sign-in page needs both. Register every other route behind the session middleware. Every write, including tus requests, needs a CSRF token.
 - Session cookie: HttpOnly, SameSite=Lax, not Secure (ADR-0002). Nothing may need a secure context.
 - Compare secrets with `crypto/subtle`. Passwords are bcrypt only.
 - Errors never echo absolute NAS paths or secrets. Map sentinel errors to HTTP statuses in one place.

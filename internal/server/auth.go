@@ -32,8 +32,8 @@ func sessionOf(r *http.Request) *session {
 
 // protected wraps h so it only runs for a signed-in User, and, for any method other
 // than GET, HEAD and OPTIONS, only with a valid CSRF token (form field csrf_token or
-// header X-CSRF-Token). Every route except /healthz, sign-in and /static goes through
-// it, registered in routes.go. Each refusal is audited.
+// header X-CSRF-Token). Every route except /healthz, sign-in, /static and /lang goes
+// through it, registered in routes.go. Each refusal is audited.
 func (s *server) protected(h http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sess := s.currentSession(w, r)

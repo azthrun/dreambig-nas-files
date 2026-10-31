@@ -10,9 +10,11 @@ import (
 
 // routes is the one place routes are registered.
 //
-// Public routes (no session) are only /healthz, sign-in (GET and POST /login) and
-// /static (the CSS the sign-in page itself needs). Every other route MUST be registered
-// with s.protected, which puts the session and CSRF checks in front of it.
+// Public routes (no session) are only /healthz, sign-in (GET and POST /login), /static
+// (the CSS and scripts the sign-in page itself needs) and /lang/<code> (the language
+// switch, which also works on the sign-in page). Static assets and the language switch
+// hold no file data; CODING_STANDARDS.md names them. Every other route MUST be
+// registered with s.protected, which puts the session and CSRF checks in front of it.
 //
 // File routes must not use ServeMux path cleaning (it redirects ".." instead of letting
 // the Path resolver refuse it); register a subtree pattern and let the handler parse
