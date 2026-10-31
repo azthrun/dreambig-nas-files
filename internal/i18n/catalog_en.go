@@ -67,6 +67,7 @@ var english = map[string]string{
 	"upload.refused":         "Not allowed here",
 	"upload.bad_name":        "This name cannot be used",
 	"upload.failed":          "Upload failed",
+	"upload.no_space":        "Not enough free space on the NAS for this file",
 	"upload.finished":        "Finished",
 	"upload.choose_folder":   "Choose a folder",
 	"upload.drop_hint":       "You can also drop files and folders anywhere on this page. Empty folders are not created.",

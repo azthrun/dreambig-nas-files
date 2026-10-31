@@ -114,6 +114,7 @@
   function failureText(err) {
     var res = err && err.originalResponse;
     var code = res ? res.getStatus() : 0;
+    if (code === 507) { return ["failed", msg("no_space")]; } // ERR_INSUFFICIENT_SPACE: free-space reserve
     if (code === 409) { return ["exists", msg("exists")]; }
     if (code === 403 || code === 404) { return ["failed", msg("refused")]; }
     if (code === 400) { return ["failed", msg("bad_name")]; }
@@ -169,13 +170,15 @@
     var up = new tus.Upload(it.file, {
       endpoint: endpoint,
       retryDelays: [0, 1000, 3000, 5000, 10000],
-      // A Conflict (409) is an answer, not a glitch: report it instead of retrying.
-      onShouldRetry: function (err) {
+      headers: { "X-CSRF-Token": token },
+      // A 409 (Conflict) and a 507 (no room) are answers, not outages: show them at once
+      // instead of retrying (a folder of existing files would otherwise wait on each one).
+      onShouldRetry: function (err, retryAttempt, options) {
         var res = err && err.originalResponse;
         var code = res ? res.getStatus() : 0;
-        return code === 0 || code >= 500 || code === 423;
+        if (code === 409 || code === 507) { return false; }
+        return tus.defaultOptions.onShouldRetry(err, retryAttempt, options);
       },
-      headers: { "X-CSRF-Token": token },
       metadata: { path: path },
       // tus' default fingerprint is name + size + mtime, which two files in different
       // folders can share (empty files, copies); resuming the wrong one would put the

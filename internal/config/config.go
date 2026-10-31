@@ -5,13 +5,15 @@ package config
 import (
 	"cmp"
 	"fmt"
+	"math"
 	"strconv"
 )
 
 // EnvVars lists every environment variable the service itself reads. Variables used
 // only by compose.yaml (UID/GID, host port) are not here; the env-docs test reads those
 // from compose.yaml. Add every new variable here AND to .env.example.
-var EnvVars = []string{envAddr, envRoot, envRequireMountPoints, envUsersFile, envAccessFile, envTrashRetentionDays}
+var EnvVars = []string{envAddr, envRoot, envRequireMountPoints, envUsersFile, envAccessFile, envTrashRetentionDays,
+	envUploadExpiryDays, envFreeSpaceReserveGB}
 
 const (
 	envAddr               = "NAS_FILES_ADDR"
@@ -20,6 +22,15 @@ const (
 	envUsersFile          = "NAS_FILES_USERS_FILE"
 	envAccessFile         = "NAS_FILES_ACCESS_FILE"
 	envTrashRetentionDays = "NAS_FILES_TRASH_RETENTION_DAYS"
+	envUploadExpiryDays   = "NAS_FILES_UPLOAD_EXPIRY_DAYS"
+	envFreeSpaceReserveGB = "NAS_FILES_FREE_SPACE_RESERVE_GB"
+
+	// defaultUploadExpiryDays: a week covers a long weekend away; staged data of a dead
+	// Upload is then reclaimed.
+	defaultUploadExpiryDays = 7
+	// defaultReserveGB (decimal GB): keeps the volume usable for DSM, snapshots and
+	// logs. Small next to a DS220+'s disks, big enough to stop a runaway Upload.
+	defaultReserveGB = 5.0
 
 	defaultAddr       = ":8080"
 	defaultRoot       = "/data"
@@ -47,6 +58,12 @@ type Config struct {
 	AccessFile string
 	// TrashRetentionDays is how long Trash is kept before it is purged; 0 means never.
 	TrashRetentionDays int
+	// UploadExpiryDays is how long an incomplete Upload may sit idle before it is
+	// removed; 0 keeps them forever.
+	UploadExpiryDays int
+	// FreeSpaceReserveBytes is the free space a Mount's filesystem must keep after a new
+	// Upload's declared length; a new Upload that would break it is refused. 0 disables.
+	FreeSpaceReserveBytes int64
 }
 
 // Load builds a Config from getenv (os.Getenv in production).
@@ -58,6 +75,23 @@ func Load(getenv func(string) string) (Config, error) {
 		UsersFile:          cmp.Or(getenv(envUsersFile), defaultUsersFile),
 		AccessFile:         cmp.Or(getenv(envAccessFile), defaultAccessFile),
 		TrashRetentionDays: defaultTrashDays,
+
+		UploadExpiryDays:      defaultUploadExpiryDays,
+		FreeSpaceReserveBytes: int64(defaultReserveGB * 1e9),
+	}
+	if s := getenv(envUploadExpiryDays); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 0 {
+			return c, fmt.Errorf("%s: want a whole number of days, 0 or more (0 keeps abandoned Uploads forever), got %q", envUploadExpiryDays, s)
+		}
+		c.UploadExpiryDays = n
+	}
+	if s := getenv(envFreeSpaceReserveGB); s != "" {
+		gb, err := strconv.ParseFloat(s, 64)
+		if err != nil || math.IsNaN(gb) || math.IsInf(gb, 0) || gb < 0 || gb > 1e6 {
+			return c, fmt.Errorf("%s: want a number of GB, 0 or more (0 turns the reserve off), got %q", envFreeSpaceReserveGB, s)
+		}
+		c.FreeSpaceReserveBytes = int64(gb * 1e9)
 	}
 	if s := getenv(envTrashRetentionDays); s != "" {
 		n, err := strconv.Atoi(s)
