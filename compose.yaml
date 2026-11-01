@@ -7,7 +7,7 @@ name: dreambig-nas-files
 services:
   nas-files:
     # Pin a release tag; do not use :latest on the NAS.
-    image: ghcr.io/azthrun/dreambig-nas-files:v1.0.0
+    image: ghcr.io/azthrun/dreambig-nas-files:v1.1.0
     platform: linux/amd64
     restart: unless-stopped
     # The dedicated DSM user; see .env.example.
