@@ -174,6 +174,8 @@ func TestMoveRefusesBadDestinations(t *testing.T) {
 	e.WriteFile("docs/file.txt", "f")
 	e.Mkdir("docs/.nas-files-trash/2026-01-01")
 	e.Mkdir("docs/@eaDir")
+	e.Symlink("docs/esc", "/")
+	e.Symlink("docs/hid", "@eaDir")
 	c := e.SignIn(testenv.DefaultUser)
 
 	cases := map[string]int{
@@ -185,11 +187,19 @@ func TestMoveRefusesBadDestinations(t *testing.T) {
 		"docs/.nas-files-trash":            404,
 		"docs/.nas-files-trash/2026-01-01": 404,
 		"docs/@eaDir":                      404,
+		"docs/esc":                         404,
+		"docs/hid":                         404,
 		"secret":                           404,
 	}
 	for dest, code := range cases {
 		if rec := c.Post(folderURL("docs"), doMove(dest, "a.txt")); rec.Code != code {
 			t.Errorf("%q: status %d, want %d", dest, rec.Code, code)
+		}
+		if dest == "" {
+			continue // the picker opens at the current folder
+		}
+		if rec := c.Post(folderURL("docs"), pick(dest, "a.txt")); rec.Code != code {
+			t.Errorf("picker at %q: status %d, want %d", dest, rec.Code, code)
 		}
 	}
 	if !exists(e, "docs/a.txt") {
@@ -250,6 +260,26 @@ func TestMoveIsRefusedWithoutWriteAccess(t *testing.T) {
 	}
 	if rec := c.Post(folderURL(""), doMove("docs", "docs")); rec.Code != http.StatusForbidden {
 		t.Errorf("moving a Mount: status %d", rec.Code)
+	}
+}
+
+func TestMoveOutOfALinkIntoAReadOnlyMountIsRefused(t *testing.T) {
+	e := testenv.New(t, testenv.Mount("docs"), testenv.ReadOnlyMount("archive"),
+		testenv.Grant(testenv.DefaultUser, "docs", "write"),
+		testenv.Grant(testenv.DefaultUser, "archive", "write"),
+	)
+	e.WriteFile("archive/box/a.txt", "a")
+	e.Mkdir("archive/out")
+	e.Symlink("docs/into-archive", "../archive/box")
+	c := e.SignIn(testenv.DefaultUser)
+
+	for _, v := range []url.Values{pick("", "a.txt"), doMove("archive/out", "a.txt")} {
+		if rec := c.Post(folderURL("docs/into-archive"), v); rec.Code != http.StatusForbidden {
+			t.Errorf("%s: status %d", v.Get("op"), rec.Code)
+		}
+	}
+	if !exists(e, "archive/box/a.txt") || exists(e, "archive/out/a.txt") {
+		t.Error("a refused move changed something")
 	}
 }
 
