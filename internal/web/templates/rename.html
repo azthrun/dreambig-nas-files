@@ -1,0 +1,15 @@
+{{template "header" .}}
+{{with .Rename}}<section class="card medium">
+<div class="title-row"><span class="tile">{{template "icon" "pencil"}}</span><h1>{{t $.Lang "rename.title"}}</h1></div>
+<form method="post" action="{{.Back}}" class="stack">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<input type="hidden" name="op" value="rename-confirm">
+<input type="hidden" name="names" value="{{.Old}}">
+<label>{{t $.Lang "rename.name" .Old}} <input type="text" name="name" value="{{.Name}}" required maxlength="255" autocomplete="off" autofocus{{if .Error}} aria-invalid="true" aria-describedby="rename-error"{{end}}></label>
+{{if .Error}}<p class="field-error" id="rename-error" role="alert">{{template "icon" "circle-alert"}}<span>{{t $.Lang .Error}}</span></p>
+{{end}}<div class="confirm"><a class="btn" href="{{.Back}}">{{t $.Lang "delete.cancel"}}</a>
+<button type="submit" class="btn primary">{{template "icon" "pencil"}}{{t $.Lang "rename.confirm"}}</button></div>
+</form>
+</section>
+{{end}}
+{{template "footer" .}}

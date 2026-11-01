@@ -1,6 +1,6 @@
 # NAS Files
 
-A lightweight web file manager on a Synology NAS that lets people on the home network or the tailnet browse, download, upload and delete files in designated NAS folders.
+A lightweight web file manager on a Synology NAS that lets people on the home network or the tailnet browse, download, upload, rename, move and delete files in designated NAS folders.
 
 ## Language
 
@@ -21,6 +21,10 @@ _Avoid_: Full path, NAS path
 **Trash**:
 A service-owned place in each writable Mount that holds deleted and replaced content until it is purged.
 _Avoid_: Recycle bin, `#recycle` (that is Synology's own, separate bin)
+
+**Move**:
+Changing an item's folder inside its Mount with one atomic rename; it never crosses Mounts and never replaces anything.
+_Avoid_: Transfer, cut and paste
 
 **Hidden Entry**:
 Anything in a Mount that belongs to the NAS or to a service rather than to Users, such as the Trash and DSM's system folders; never shown and never a valid Path.

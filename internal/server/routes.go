@@ -106,8 +106,9 @@ func (s *server) filesRoute(w http.ResponseWriter, r *http.Request) {
 
 // filesPost dispatches POST /files/<Path> by the form field op: mkdir, zip (the browse
 // selection form's download button, names= checkboxes of the folder in the URL), delete
-// (the confirm page) and delete-confirm (the move to the Trash); the last three share
-// the selection form.
+// (the confirm page), delete-confirm (the move to the Trash), rename and move (their
+// pages) and rename-confirm and move-confirm (the change); all but mkdir share the
+// selection form.
 func (s *server) filesPost(w http.ResponseWriter, r *http.Request) {
 	switch r.PostFormValue("op") {
 	case "mkdir":
@@ -123,6 +124,14 @@ func (s *server) filesPost(w http.ResponseWriter, r *http.Request) {
 		s.confirmDelete(w, r)
 	case "delete-confirm":
 		s.deleteItems(w, r)
+	case "rename":
+		s.renameForm(w, r)
+	case "rename-confirm":
+		s.renameItem(w, r)
+	case "move":
+		s.movePicker(w, r)
+	case "move-confirm":
+		s.moveItems(w, r)
 	default:
 		s.refuseRoute(w, r, http.StatusBadRequest)
 	}
