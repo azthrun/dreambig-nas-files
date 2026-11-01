@@ -23,7 +23,7 @@ var errNoAccess = fmt.Errorf("no Access: %w", resolver.ErrNotFound)
 // symlinks), so a link into a Mount the User cannot reach fails like a missing Path.
 //
 //   - need access.Read: browse, download, zip. No Access -> errNoAccess.
-//   - need access.Write: mkdir, Upload, delete, replace; loc is the thing being created,
+//   - need access.Write: mkdir, Upload, delete, replace, rename, move; loc is the thing being created,
 //     changed or removed (for Upload or mkdir, the new Path resolved with Exists false).
 //     No Access -> errNoAccess; only read Access, a read-only Mount, or loc being
 //     the Root or a Mount folder itself (top level is read-only) -> errForbidden.

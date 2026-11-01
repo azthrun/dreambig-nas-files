@@ -221,6 +221,10 @@ type page struct {
 	Browse *browseView
 	// Confirm is the delete confirmation page's data.
 	Confirm *confirmView
+	// Rename is the rename page's data.
+	Rename *renameView
+	// Move is the move page's data.
+	Move *moveView
 
 	Next      string // this page's own address, for the language switch to return to
 	LangLinks []langLink

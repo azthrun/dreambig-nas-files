@@ -6,7 +6,8 @@
 // filesystem cannot hard-link. Either way the content never leaves the Mount.
 //
 // Place is the one operation that puts something in the Trash; the delete handler and
-// "replace on Conflict" both use it.
+// "replace on Conflict" both use it. Move, for rename and move, lives here too: it is a
+// tree change, so it needs the same write lock and the same never-replace rule.
 package trash
 
 import (
@@ -98,6 +99,90 @@ func (t *Trash) Locked(fn func(place func(mount, rel string) (string, error)) er
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return fn(t.place)
+}
+
+// Move renames the file, folder or symlink at from to to, both slash-separated and inside
+// the one Mount, so it is atomic and never copies. A symlink is moved itself, never its
+// target. Nothing is ever replaced: a taken name is ErrTaken. The one exception is a
+// new spelling of the same entry on a case-insensitive filesystem (foo to Foo), where the
+// name is "taken" by the entry itself.
+//
+// The caller has already judged Access; like Place, Move refuses read-only Mounts,
+// the Mount's top level, anything Hidden, and a folder above from or to that became a link.
+func (t *Trash) Move(mount, from, to string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	root, ok := t.roots[mount]
+	if !ok {
+		return ErrNoMount
+	}
+	if t.readOnly[mount] {
+		return ErrReadOnly
+	}
+	if !validRel(from) || !validRel(to) || to == from || strings.HasPrefix(to, from+"/") {
+		return ErrInvalid
+	}
+	if err := recheckParent(root, from); err != nil {
+		return err
+	}
+	if err := recheckParent(root, to); err != nil {
+		return err
+	}
+	fi, err := root.Lstat(from)
+	if errors.Is(err, fs.ErrNotExist) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return moveError(err)
+	}
+	taken, err := root.Lstat(to)
+	switch {
+	case err == nil:
+		if !sameEntry(from, to, fi, taken) {
+			return ErrTaken
+		}
+		return moveError(root.Rename(from, to))
+	case !errors.Is(err, fs.ErrNotExist):
+		return moveError(err)
+	case fi.IsDir():
+		// Go's Rename refuses to move a folder onto an existing one, and the name was
+		// just checked under the write lock.
+		return moveError(root.Rename(from, to))
+	}
+	err = root.Link(from, to)
+	switch {
+	case err == nil:
+		if err := root.Remove(from); err != nil {
+			_ = root.Remove(to) // the file is still at from: leave one name, not two
+			return moveError(err)
+		}
+		return nil
+	case errors.Is(err, fs.ErrExist):
+		return ErrTaken
+	case noHardLinks(err):
+		return moveError(root.Rename(from, to)) // the name was checked above, as in moveNoReplace
+	}
+	return moveError(err)
+}
+
+// sameEntry reports whether from and to are one entry spelled two ways.
+func sameEntry(from, to string, fromInfo, toInfo fs.FileInfo) bool {
+	return path.Dir(from) == path.Dir(to) && mounts.Fold(path.Base(from)) == mounts.Fold(path.Base(to)) && os.SameFile(fromInfo, toInfo)
+}
+
+// moveError maps a failed Move step to the sentinels, dropping OS paths.
+func moveError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ENOTDIR):
+		return ErrNotFound
+	case errors.Is(err, syscall.ENAMETOOLONG):
+		return resolver.ErrTooLong
+	case errors.Is(err, syscall.EINVAL):
+		return ErrInvalid // a folder into itself, reached by a spelling the check above missed
+	}
+	return fmt.Errorf("move: %w", scrub.Path(err))
 }
 
 // place is Place for a caller that holds t.mu. Right before the move it re-checks the
@@ -292,4 +377,6 @@ var (
 	ErrInvalid = errors.New("trash: invalid path")
 	// ErrNotFound means there is nothing at rel.
 	ErrNotFound = errors.New("trash: nothing there")
+	// ErrTaken means a Move's destination name is taken.
+	ErrTaken = errors.New("trash: name taken")
 )

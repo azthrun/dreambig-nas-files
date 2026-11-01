@@ -32,7 +32,9 @@ type selectedItem struct {
 
 type selection struct {
 	Folder resolver.Path
-	Items  []selectedItem
+	// loc is Folder itself, resolved: its Mount and Rel are where the Items really live.
+	loc   resolver.Location
+	Items []selectedItem
 }
 
 type confirmItem struct {
@@ -116,7 +118,7 @@ func (s *server) selected(r *http.Request, user string) (*selection, string, err
 	if err != nil {
 		return nil, auditPath, err
 	}
-	sel := &selection{Folder: folder}
+	sel := &selection{Folder: folder, loc: loc}
 	for _, name := range r.PostForm["names"] {
 		if slices.ContainsFunc(sel.Items, func(it selectedItem) bool { return it.Name == norm.NFC.String(name) }) {
 			continue

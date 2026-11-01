@@ -1,0 +1,34 @@
+{{template "header" .}}
+{{with .Move}}<section class="card medium">
+<div class="title-row"><span class="tile">{{template "icon" "folder-input"}}</span><h1>{{t $.Lang "move.title"}}</h1></div>
+<ul class="names">
+{{range .Items}}<li>{{if .IsDir}}{{template "icon" "folder"}}{{else}}{{template "icon" "file"}}{{end}}<span>{{.Name}}</span></li>
+{{end}}</ul>
+<p>{{t $.Lang "move.prompt"}}</p>
+{{/* Walking the folders is a POST of the same selection: plain HTML, no JavaScript. */}}
+<form method="post" action="{{.Back}}" class="picker">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<input type="hidden" name="op" value="move">
+{{range .Items}}<input type="hidden" name="names" value="{{.Name}}">
+{{end}}<nav class="crumbs" aria-label="{{t $.Lang "browse.location"}}"><ol>
+{{range $i, $c := .Crumbs}}<li>{{if eq (len (slice $.Move.Crumbs $i)) 1}}<span aria-current="page">{{$c.Name}}</span>{{else}}<button type="submit" class="link" name="at" value="{{$c.Path}}">{{$c.Name}}</button>{{template "icon" "chevron-right"}}{{end}}</li>
+{{end}}</ol></nav>
+{{if .Folders}}<ul class="names">
+{{range .Folders}}<li>{{template "icon" "folder"}}<button type="submit" class="link" name="at" value="{{.Path}}">{{.Name}}</button></li>
+{{end}}</ul>
+{{else}}<p class="muted">{{t $.Lang "move.no_folders"}}</p>
+{{end}}</form>
+{{if .Error}}<p class="field-error" role="alert">{{template "icon" "circle-alert"}}<span>{{t $.Lang .Error}}</span></p>
+{{end}}<p class="note">{{template "icon" "info"}}<span>{{t $.Lang "move.note"}}</span></p>
+<form method="post" action="{{.Back}}" class="confirm">
+<input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+<input type="hidden" name="op" value="move-confirm">
+<input type="hidden" name="dest" value="{{.At}}">
+{{range .Items}}<input type="hidden" name="names" value="{{.Name}}">
+{{end}}<a class="btn" href="{{.Back}}">{{t $.Lang "delete.cancel"}}</a>
+{{if .Here}}<span class="muted">{{t $.Lang "move.already_here"}}</span>
+{{else}}<button type="submit" class="btn primary">{{template "icon" "folder-input"}}{{t $.Lang "move.confirm"}}</button>
+{{end}}</form>
+</section>
+{{end}}
+{{template "footer" .}}
