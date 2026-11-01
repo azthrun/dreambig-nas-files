@@ -65,6 +65,13 @@ func statusOf(err error) int { return refusalOf(err).Status }
 // Access, which answers like a missing Path but is worth knowing about. An unexpected
 // error is logged, audited as failed, and shown as a generic internal error.
 func (s *server) refuse(w http.ResponseWriter, r *http.Request, op, user, path string, err error, routineMiss bool) {
+	s.refuseWith(w, r, op, user, path, err, routineMiss, s.errorPage)
+}
+
+// refuseWith is refuse with the answer left to the caller, for a refusal shown on the page
+// the User was already on.
+func (s *server) refuseWith(w http.ResponseWriter, r *http.Request, op, user, path string, err error, routineMiss bool,
+	answer func(http.ResponseWriter, *http.Request, int, string)) {
 	ref := refusalOf(err)
 	ev := audit.Event{User: user, Operation: op, Outcome: audit.Refused, Status: ref.Status}
 	if !errors.Is(err, resolver.ErrInvalidPath) || errors.Is(err, resolver.ErrInvalidName) {
@@ -75,11 +82,11 @@ func (s *server) refuse(w http.ResponseWriter, r *http.Request, op, user, path s
 		s.Log.Error(op, "err", scrub.Path(err))
 		ev.Outcome = audit.Failed
 	case routineMiss && isPlainMiss(err):
-		s.errorPage(w, r, ref.Status, ref.Key)
+		answer(w, r, ref.Status, ref.Key)
 		return
 	}
 	s.Audit.Record(ev)
-	s.errorPage(w, r, ref.Status, ref.Key)
+	answer(w, r, ref.Status, ref.Key)
 }
 
 // isPlainMiss is a valid Path that names nothing, as opposed to one the User may not

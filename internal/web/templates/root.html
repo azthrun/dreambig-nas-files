@@ -1,9 +1,8 @@
 {{template "header" .}}
-<h1>{{.Title}}</h1>
-<h2>{{t .Lang "root.mounts"}}</h2>
-{{if .Mounts}}<ul class="mounts">
-{{range .Mounts}}<li><a href="{{.Href}}">{{.Name}}</a>{{if .ReadOnly}} <span class="tag">{{t $.Lang "root.read_only"}}</span>{{end}}</li>
+<h1 class="page-title">{{t .Lang "root.mounts"}}</h1>
+{{if .Mounts}}<ul class="mounts card">
+{{range .Mounts}}<li><a href="{{.Href}}"><span class="tile folder">{{template "icon" "folder"}}</span><span class="name">{{.Name}}</span>{{if .ReadOnly}}<span class="tag">{{template "icon" "lock"}}{{t $.Lang "root.read_only"}}</span>{{end}}{{template "icon" "chevron-right"}}</a></li>
 {{end}}</ul>
-{{else}}<p>{{t .Lang "root.no_mounts"}}</p>
+{{else}}<section class="card empty"><span class="tile round">{{template "icon" "folder"}}</span><p>{{t .Lang "root.no_mounts"}}</p></section>
 {{end}}
 {{template "footer" .}}

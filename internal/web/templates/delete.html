@@ -1,16 +1,18 @@
 {{template "header" .}}
-{{with .Confirm}}<h1>{{t $.Lang "delete.title"}}</h1>
+{{with .Confirm}}<section class="card medium">
+<div class="title-row"><span class="tile">{{template "icon" "trash-2"}}</span><h1>{{t $.Lang "delete.title"}}</h1></div>
 <p>{{t $.Lang "delete.prompt"}}</p>
 <ul class="names">
-{{range .Names}}<li>{{.}}</li>
+{{range .Items}}<li>{{if .IsDir}}{{template "icon" "folder"}}{{else}}{{template "icon" "file"}}{{end}}<span>{{.Name}}</span></li>
 {{end}}</ul>
-<p class="note">{{t $.Lang "delete.note"}}</p>
+<p class="note">{{template "icon" "info"}}<span>{{t $.Lang "delete.note"}}</span></p>
 <form method="post" action="{{.Back}}" class="confirm">
 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
 <input type="hidden" name="op" value="delete-confirm">
-{{range .Names}}<input type="hidden" name="names" value="{{.}}">
-{{end}}<button type="submit">{{t $.Lang "delete.confirm"}}</button>
-<a href="{{.Back}}">{{t $.Lang "delete.cancel"}}</a>
+{{range .Items}}<input type="hidden" name="names" value="{{.Name}}">
+{{end}}<a class="btn" href="{{.Back}}">{{t $.Lang "delete.cancel"}}</a>
+<button type="submit" class="btn danger-solid">{{template "icon" "trash-2"}}{{t $.Lang "delete.confirm"}}</button>
 </form>
+</section>
 {{end}}
 {{template "footer" .}}

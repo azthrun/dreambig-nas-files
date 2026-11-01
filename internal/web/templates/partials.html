@@ -8,18 +8,19 @@
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<header class="bar">
-<strong>{{t .Lang "app.name"}}</strong>
+<header class="bar"><div class="bar-inner">
+<a class="brand" href="/">{{t .Lang "app.name"}}</a>
 <nav class="lang" aria-label="{{t .Lang "nav.language"}}">{{range .LangLinks}}{{if .Current}}<span aria-current="true" lang="{{.Code}}">{{t $.Lang (printf "lang.%s" .Code)}}</span>{{else}}<a href="{{.Href}}" lang="{{.Code}}" hreflang="{{.Code}}">{{t $.Lang (printf "lang.%s" .Code)}}</a>{{end}} {{end}}</nav>
 {{if .User}}<span class="who">{{t .Lang "root.signed_in_as" .User}}</span>
 <form method="post" action="/logout">
 <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-<button type="submit">{{t .Lang "nav.sign_out"}}</button>
+<button type="submit" class="btn">{{t .Lang "nav.sign_out"}}</button>
 </form>
-{{end}}</header>
+{{end}}</div></header>
 <main>
 {{end}}
 {{define "footer"}}</main>
 </body>
 </html>
 {{end}}
+{{define "icon"}}<svg class="icon" aria-hidden="true"><use href="/static/icons.svg#{{.}}"></use></svg>{{end}}

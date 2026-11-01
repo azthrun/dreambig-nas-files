@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/azthrun/dreambig-nas-files/internal/i18n"
 	"github.com/azthrun/dreambig-nas-files/internal/testenv"
 )
 
@@ -301,10 +302,10 @@ func TestSymlinkBetweenMountsIsJudgedByTheRealTargetsMount(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "report.txt") {
 		t.Fatalf("link into another Mount = %d, want its listing", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "read-only") {
+	if !strings.Contains(rec.Body.String(), i18n.T(i18n.Default, "root.read_only")) {
 		t.Error("page does not show the target Mount (archive) as read-only")
 	}
-	if strings.Contains(c.Get("/files/docs").Body.String(), "read-only") {
+	if strings.Contains(c.Get("/files/docs").Body.String(), i18n.T(i18n.Default, "root.read_only")) {
 		t.Error("writable Mount shown as read-only")
 	}
 }

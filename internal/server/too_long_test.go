@@ -121,8 +121,12 @@ func TestMkdirStopsAtTheSystemPathLimit(t *testing.T) {
 		t.Errorf("the new folder answers %d", got.Code)
 	}
 	over := strings.Repeat("c", room+1)
-	if rec := c.Post("/files/"+dir, mkdirForm(over)); rec.Code != http.StatusBadRequest {
+	rec := c.Post("/files/"+dir, mkdirForm(over))
+	if rec.Code != http.StatusBadRequest {
 		t.Errorf("mkdir past the limit = %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), over) {
+		t.Error("the refusal lost the typed name")
 	}
 	if exists(e, dir+"/"+over) {
 		t.Error("a folder past the limit was created")

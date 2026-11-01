@@ -3,6 +3,7 @@ package server
 import (
 	"io/fs"
 	"net/http"
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ type entryView struct {
 	Name     string
 	Href     string // folders open their listing; files download
 	IsDir    bool
+	Icon     string // symbol in static/icons.svg
 	Size     string
 	Modified string
 	ISO      string
@@ -34,7 +36,6 @@ type columnView struct {
 	Href    string
 	Current bool
 	Sort    string // aria-sort of the current column
-	Arrow   string
 }
 
 type browseView struct {
@@ -54,6 +55,9 @@ type browseView struct {
 	PrevHref  string
 	NextHref  string
 	Dest      string // this folder's Path: where the upload panel sends files
+	// MkdirError and MkdirName reopen the create-folder form on a refused name.
+	MkdirError string
+	MkdirName  string
 }
 
 // pathFromRequest extracts the Path from /files/<escaped Path>. Anything that is not
@@ -69,7 +73,6 @@ func pathFromRequest(r *http.Request) (resolver.Path, error) {
 // browse lists a folder: GET /files/<Path>?sort=&order=&page=.
 func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 	user := sessionOf(r).User
-	lang := langOf(r)
 	rest := strings.TrimPrefix(r.URL.EscapedPath(), filesPrefix)
 	if rest == "" || rest == "/" { // the Root is the home page
 		http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -105,6 +108,12 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.render(w, r, http.StatusOK, "browse.html", page{Title: p.Name(), Browse: s.folderView(r, user, p, loc, entries)})
+}
+
+// folderView builds the listing of a folder the User may read.
+func (s *server) folderView(r *http.Request, user string, p resolver.Path, loc resolver.Location, entries []resolver.Entry) *browseView {
+	lang := langOf(r)
 	q := r.URL.Query()
 	key, order := listing.ParseKey(q.Get("sort")), listing.ParseOrder(q.Get("order"))
 	entries = slices.DeleteFunc(entries, func(e resolver.Entry) bool {
@@ -127,11 +136,11 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 	}
 	v.CanDelete = !v.ReadOnly
 	for _, e := range shown {
-		ev := entryView{Name: e.Name, IsDir: e.IsDir, Modified: i18n.FormatTime(lang, e.ModTime), ISO: e.ModTime.UTC().Format("2006-01-02T15:04:05Z")}
+		ev := entryView{Name: e.Name, IsDir: e.IsDir, Icon: entryIcon(e), Modified: i18n.FormatTime(lang, e.ModTime), ISO: e.ModTime.UTC().Format("2006-01-02T15:04:05Z")}
 		if child, err := p.Join(e.Name); err == nil {
 			ev.Href = folderHref(child) // a file's link downloads it
 		}
-		ev.Size = "-"
+		ev.Size = "—"
 		if !e.IsDir {
 			ev.Size = i18n.FormatSize(lang, e.Size)
 		}
@@ -146,11 +155,11 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 		cv := columnView{Label: c.label}
 		if c.key == key {
 			cv.Current = true
-			cv.Sort, cv.Arrow = "ascending", "▲"
+			cv.Sort = "ascending"
 			if order == listing.Asc {
 				next = listing.Desc
 			} else {
-				cv.Sort, cv.Arrow = "descending", "▼"
+				cv.Sort = "descending"
 			}
 		}
 		cv.Href = query(base, c.key, next, 0)
@@ -162,8 +171,25 @@ func (s *server) browse(w http.ResponseWriter, r *http.Request) {
 	if cur < pages {
 		v.NextHref = query(base, key, order, cur+1)
 	}
-	title := p.Name()
-	s.render(w, r, http.StatusOK, "browse.html", page{Title: title, Browse: v})
+	return v
+}
+
+// entryIcon picks the listing icon from the entry's kind and extension.
+func entryIcon(e resolver.Entry) string {
+	if e.IsDir {
+		return "folder"
+	}
+	switch strings.ToLower(path.Ext(e.Name)) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".tif", ".tiff", ".bmp", ".svg", ".cr2", ".cr3", ".nef", ".arw", ".dng":
+		return "file-image"
+	case ".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v":
+		return "file-video"
+	case ".xls", ".xlsx", ".csv", ".ods", ".numbers":
+		return "file-spreadsheet"
+	case ".txt", ".md", ".pdf", ".doc", ".docx", ".rtf", ".odt", ".pages":
+		return "file-text"
+	}
+	return "file"
 }
 
 func (s *server) refuseBrowse(w http.ResponseWriter, r *http.Request, user string, p resolver.Path, err error) {
@@ -173,7 +199,7 @@ func (s *server) refuseBrowse(w http.ResponseWriter, r *http.Request, user strin
 // crumbsFor builds the breadcrumb trail: Files > mount > folder > ... The last crumb is
 // the current folder.
 func crumbsFor(lang string, p resolver.Path) []crumb {
-	cs := []crumb{{Name: i18n.T(lang, "root.title"), Href: "/"}}
+	cs := []crumb{{Name: i18n.T(lang, "root.mounts"), Href: "/"}}
 	segs := p.Segments()
 	for i, name := range segs {
 		sub, err := resolver.ParseSegments(segs[:i+1])

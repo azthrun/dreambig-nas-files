@@ -1,9 +1,11 @@
 {{template "header" .}}
+<section class="card narrow">
 <h1>{{.Title}}</h1>
-{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
-<form method="post" action="/login">
+{{if .Error}}<p class="banner" role="alert">{{template "icon" "circle-alert"}}<span>{{.Error}}</span></p>{{end}}
+<form method="post" action="/login" class="stack">
 <label>{{t .Lang "signin.name"}} <input name="name" value="{{.Name}}" autocomplete="username" autofocus required></label>
 <label>{{t .Lang "signin.password"}} <input name="password" type="password" autocomplete="current-password" required></label>
-<button type="submit">{{t .Lang "signin.submit"}}</button>
+<button type="submit" class="btn primary wide">{{t .Lang "signin.submit"}}</button>
 </form>
+</section>
 {{template "footer" .}}
