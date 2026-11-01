@@ -6,7 +6,6 @@ import (
 	"path"
 
 	"github.com/azthrun/dreambig-nas-files/internal/audit"
-	"github.com/azthrun/dreambig-nas-files/internal/resolver"
 )
 
 // Rename is two steps of the browse selection form (POST /files/<folder>, see filesPost):
@@ -79,8 +78,8 @@ func (s *server) renameItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rel := path.Join(sel.loc.Rel(), child.Name())
-	if !sel.loc.Fits(rel) {
-		failName(resolver.ErrTooLong)
+	if err := refuseTooLong(it, rel); err != nil {
+		failName(err)
 		return
 	}
 	if s.clashesWithOther(sel.loc, child.Name(), it.Name) {

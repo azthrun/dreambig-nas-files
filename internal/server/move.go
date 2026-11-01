@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io/fs"
 	"net/http"
+	"os"
 	"path"
 	"slices"
 	"strings"
@@ -92,20 +93,22 @@ func (s *server) movePicker(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.renderPicker(w, r, sel, at, http.StatusOK, "")
+	if err := s.renderPicker(w, r, sel, at, http.StatusOK, ""); err != nil {
+		s.refuse(w, r, "move", user, at.Path.String(), err, false)
+	}
 }
 
 // renderPicker shows the picker at the folder at. A folder that can no longer be listed
-// gets the plain error page.
-func (s *server) renderPicker(w http.ResponseWriter, r *http.Request, sel *selection, at resolver.Location, status int, key string) {
+// is returned with nothing answered: the caller knows whether that is a new refusal to
+// audit or the page of one already audited.
+func (s *server) renderPicker(w http.ResponseWriter, r *http.Request, sel *selection, at resolver.Location, status int, key string) error {
 	atPath, err := mountPath(at)
 	var entries []resolver.Entry
 	if err == nil {
 		entries, err = at.ReadDir()
 	}
 	if err != nil {
-		s.refuse(w, r, "move", sessionOf(r).User, atPath.String(), err, false)
-		return
+		return err
 	}
 	v := &moveView{At: atPath.String(), Here: sameFolder(at, sel.loc), Back: folderHref(sel.Folder), Error: key}
 	for _, it := range sel.Items {
@@ -128,6 +131,7 @@ func (s *server) renderPicker(w http.ResponseWriter, r *http.Request, sel *selec
 		}
 	}
 	s.render(w, r, status, "move.html", page{Title: sel.Folder.Name(), Move: v, Next: v.Back})
+	return nil
 }
 
 func sameFolder(a, b resolver.Location) bool {
@@ -158,10 +162,12 @@ func (s *server) moveItems(w http.ResponseWriter, r *http.Request) {
 		s.refuse(w, r, "move", user, auditPath, err, false)
 		return
 	}
-	plan, failed, err := s.planMove(sel, dest)
+	plan, failed, err := planMove(sel, dest)
 	fail := func(where string, err error) {
 		s.refuseWith(w, r, "move", user, where, err, false, func(w http.ResponseWriter, r *http.Request, status int, key string) {
-			s.renderPicker(w, r, sel, dest, status, key)
+			if s.renderPicker(w, r, sel, dest, status, key) != nil {
+				s.errorPage(w, r, status, key)
+			}
 		})
 	}
 	if err != nil {
@@ -178,27 +184,46 @@ func (s *server) moveItems(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, folderHref(sel.Folder), http.StatusSeeOther)
 }
 
-// planMove checks every item against dest. On error the string is the item's Path.
-func (s *server) planMove(sel *selection, dest resolver.Location) ([]plannedMove, string, error) {
+// planMove checks every item against dest. On error the string is the Path to audit: the
+// item's, or dest's when dest cannot be read. A name is taken if a case-insensitive client
+// would see it taken, or if anything at all has it on disk: the listing leaves out links
+// that dangle, escape or lead to a Hidden Entry, and Trash.Move would stop at one halfway.
+func planMove(sel *selection, dest resolver.Location) ([]plannedMove, string, error) {
 	destPath, err := mountPath(dest)
 	if err != nil {
 		return nil, "", err
 	}
+	entries, err := dest.ReadDir()
+	if err != nil {
+		return nil, destPath.String(), err
+	}
+	root, err := dest.OS()
+	if err != nil {
+		return nil, destPath.String(), err
+	}
 	plan := make([]plannedMove, 0, len(sel.Items))
-	seen := map[string]bool{}
+	seen := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		seen[mounts.Fold(e.Name)] = true
+	}
 	for _, it := range sel.Items {
 		from := it.Path.String()
 		if err := refuseLinkOrSelf(it, dest); err != nil {
 			return nil, from, err
 		}
 		fold := mounts.Fold(it.Name)
-		if s.clashes(dest, it.Name) || seen[fold] {
+		if seen[fold] {
 			return nil, from, errExists
 		}
 		seen[fold] = true
 		rel := path.Join(dest.Rel(), it.loc.Real[len(it.loc.Real)-1])
-		if !dest.Fits(rel) {
-			return nil, from, resolver.ErrTooLong
+		if _, err := root.Lstat(rel); err == nil {
+			return nil, from, errExists
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return nil, from, err
+		}
+		if err := refuseTooLong(it, rel); err != nil {
+			return nil, from, err
 		}
 		p, err := destPath.Join(it.Name)
 		if err != nil {
@@ -235,6 +260,67 @@ func refuseLinkOrSelf(it selectedItem, dest resolver.Location) error {
 		return errIntoItself
 	}
 	return nil
+}
+
+// refuseTooLong refuses a rename or move to rel that would put the item, or anything in a
+// real folder, past what the system takes. os.Root would carry it there, leaving it where
+// no later request can reach (see Location.TooLong). A link moves as the link.
+func refuseTooLong(it selectedItem, rel string) error {
+	if !it.loc.Fits(rel) {
+		return resolver.ErrTooLong
+	}
+	root, err := it.loc.OS()
+	if err != nil {
+		return err
+	}
+	fi, err := root.Lstat(it.loc.Rel())
+	if err != nil {
+		return statMiss(err)
+	}
+	if !fi.IsDir() {
+		return nil
+	}
+	longest, err := longestInside(root, it.loc.Rel())
+	if err != nil {
+		return err
+	}
+	if !it.loc.Fits(path.Join(rel, longest)) {
+		return resolver.ErrTooLong
+	}
+	return nil
+}
+
+// longestInside finds the longest path below the folder dir, relative to it, without
+// following links. A folder gone since it was listed counts for nothing. One that cannot
+// be read is an error: what it holds is unknown, so the rename or move is not safe.
+func longestInside(root *os.Root, dir string) (string, error) {
+	f, err := resolver.OpenRead(root, dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	des, err := f.ReadDir(-1)
+	f.Close() // before going deeper: a tall tree must not hold a descriptor per level
+	if err != nil {
+		return "", err
+	}
+	longest := ""
+	for _, de := range des {
+		rel := de.Name()
+		if de.IsDir() {
+			below, err := longestInside(root, path.Join(dir, rel))
+			if err != nil {
+				return "", err
+			}
+			rel = path.Join(rel, below)
+		}
+		if len(rel) > len(longest) {
+			longest = rel
+		}
+	}
+	return longest, nil
 }
 
 // statMiss treats an entry gone since the selection as a miss.

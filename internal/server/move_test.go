@@ -289,3 +289,100 @@ func TestMoveFromALinkedFolderIsJudgedByTheRealMount(t *testing.T) {
 		t.Error("the file did not arrive")
 	}
 }
+
+// The listing leaves these out, so only the disk can tell the name is taken. Trash.Move
+// would refuse the last item after the first had already moved.
+func TestMoveChangesNothingWhenAnUnlistedLinkHoldsTheName(t *testing.T) {
+	for name, target := range map[string]string{
+		"dangling":        "gone",
+		"escaping":        "/",
+		"to Hidden Entry": "../@eaDir",
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := testenv.New(t, testenv.Mount("docs"))
+			e.WriteFile("docs/in/a.txt", "a")
+			e.WriteFile("docs/in/b.txt", "b")
+			e.Mkdir("docs/out")
+			e.Mkdir("docs/@eaDir")
+			e.Symlink("docs/out/b.txt", target)
+			c := e.SignIn(testenv.DefaultUser)
+
+			rec := c.Post(folderURL("docs/in"), doMove("docs/out", "a.txt", "b.txt"))
+
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("status %d", rec.Code)
+			}
+			if !exists(e, "docs/in/a.txt") || !exists(e, "docs/in/b.txt") || exists(e, "docs/out/a.txt") {
+				t.Error("a refused move changed something")
+			}
+			if got, err := os.Readlink(filepath.Join(e.Dir, "docs/out/b.txt")); err != nil || got != target {
+				t.Errorf("the link is now %q, %v", got, err)
+			}
+			if lines := auditedOK(t, e, "move"); len(lines) != 0 {
+				t.Errorf("audit = %v", lines)
+			}
+		})
+	}
+}
+
+// unlistable makes the folder unreadable for the rest of the test.
+func unlistable(t *testing.T, e *testenv.Env, rel string) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root reads everything")
+	}
+	dir := filepath.Join(e.Dir, filepath.FromSlash(rel))
+	if err := os.Chmod(dir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+}
+
+func moveAudits(t *testing.T, e *testenv.Env) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, l := range auditLines(t, e) {
+		if l["operation"] == "move" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func TestMoveToAFolderThatCannotBeListedIsRefusedAndAuditedOnce(t *testing.T) {
+	e := testenv.New(t, testenv.Mount("docs"))
+	e.WriteFile("docs/in/a.txt", "a")
+	e.Mkdir("docs/out")
+	unlistable(t, e, "docs/out")
+	c := e.SignIn(testenv.DefaultUser)
+
+	rec := c.Post(folderURL("docs/in"), doMove("docs/out", "a.txt"))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if !exists(e, "docs/in/a.txt") {
+		t.Error("a refused move changed something")
+	}
+	lines := moveAudits(t, e)
+	if len(lines) != 1 || lines[0]["outcome"] != "failed" || lines[0]["path"] != "docs/out" {
+		t.Errorf("audit = %v", lines)
+	}
+}
+
+func TestPickerAtAFolderThatCannotBeListedIsAudited(t *testing.T) {
+	e := testenv.New(t, testenv.Mount("docs"))
+	e.WriteFile("docs/in/a.txt", "a")
+	e.Mkdir("docs/out")
+	unlistable(t, e, "docs/out")
+	c := e.SignIn(testenv.DefaultUser)
+
+	rec := c.Post(folderURL("docs/in"), pick("docs/out", "a.txt"))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if lines := moveAudits(t, e); len(lines) != 1 || lines[0]["outcome"] != "failed" || lines[0]["path"] != "docs/out" {
+		t.Errorf("audit = %v", lines)
+	}
+}
