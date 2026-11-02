@@ -12,6 +12,10 @@ import (
 
 var envVarRe = regexp.MustCompile(`NAS_FILES_[A-Z0-9_]+`)
 
+// releaseTag is the shape of a tag the owner cuts; the pinned version itself moves with
+// each release.
+var releaseTag = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+
 func varsIn(t *testing.T, name string) []string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("..", "..", name))
@@ -65,7 +69,7 @@ func TestComposePinsAReleaseTag(t *testing.T) {
 	if m == nil {
 		t.Fatal("compose.yaml has no pinned dreambig-nas-files image")
 	}
-	if got := string(m[1]); got != "v1.0.0" {
-		t.Errorf("image tag = %q, want v1.0.0", got)
+	if got := string(m[1]); !releaseTag.MatchString(got) {
+		t.Errorf("image tag = %q, want a release tag like v1.2.3", got)
 	}
 }

@@ -99,7 +99,7 @@ volumes:
 
 - Left of the first colon is the NAS path (`/volume1/` plus the shared folder name; it can be a sub-folder). Right of it is `/data/<mount>`, where `<mount>` is the name Users see.
 - Add `:ro` at the end to make a Mount read-only for everyone. It then has no Trash and no Staging Area, and every change is refused.
-- `image:` pins a release tag (`v1.0.0`). Keep it pinned; do not use `latest` on the NAS.
+- `image:` pins a release tag (for example `v1.1.0`). Keep it pinned; do not use `latest` on the NAS.
 
 ## 6. Start it in Container Manager
 
