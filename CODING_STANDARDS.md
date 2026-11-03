@@ -20,9 +20,9 @@ Go. Read `GLOSSARY.md` and `docs/adr/` first. Code from the sibling services is 
 - Hidden Entries (`@*`, `#*`, `.DS_Store`, Staging Area, `.nas-files-trash`, `.nas-mcp-trash`) are never listed and look like not-found. An inaccessible Mount behaves as nonexistent (404, not 403).
 - Use `os.Root` (one per Mount) for I/O after validation.
 - Never destroy data. Delete and replace move to the Mount's Trash inside the same filesystem (rename for folders; link then unlink for files, since rename would replace, falling back to a rename after checking the name is free, under the write lock, only where the filesystem cannot hard-link), never overwriting a Trash entry. Only Staging Area data, Trash purge and zero-length temp files may be removed.
-- Never overwrite silently. Complete Uploads with a create-exclusive hard link; `rename` would replace.
+- Never overwrite silently. Complete Uploads with a create-exclusive hard link; `rename` would replace. Rename and move go through `Trash.Move`, under the write lock: a taken name is refused, and they never leave the Mount (ADR-0005).
 - The top level (Root and the Mounts themselves) is read-only. A read-only Mount refuses every change for every User.
-- Serialise tree changes (Trash placement, purge, delete) with one process-wide `sync.Mutex`; re-check the resolved parent right before the rename. A purge holds it only to set expired folders aside (a rename); removing them can take minutes and runs outside it, on folders nothing is placed into any more.
+- Serialise tree changes (Trash placement, purge, delete, rename, move) with one process-wide `sync.Mutex`; re-check the resolved parent right before the rename. A purge holds it only to set expired folders aside (a rename); removing them can take minutes and runs outside it, on folders nothing is placed into any more.
 
 ## HTTP and security
 

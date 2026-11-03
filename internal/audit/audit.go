@@ -51,6 +51,8 @@ type Event struct {
 	// one (a kept-both Upload lands at "name (1).ext"); Path is where it really is. Empty
 	// when they are the same.
 	Requested string
+	// From is where a renamed or moved item was; Path is where it is now.
+	From string
 	// Omitted is how many entries a Partial operation left out.
 	Omitted int
 	// Items are the Paths an operation on a selection covered; Path is their folder.
@@ -67,6 +69,7 @@ type line struct {
 	Bytes     int64    `json:"bytes,omitempty"`
 	Choice    string   `json:"choice,omitempty"`
 	Requested string   `json:"requested,omitempty"`
+	From      string   `json:"from,omitempty"`
 	Omitted   int      `json:"omitted,omitempty"`
 	Items     []string `json:"items,omitempty"`
 }
@@ -96,6 +99,7 @@ func (l *Logger) Record(e Event) {
 		Bytes:     e.Bytes,
 		Choice:    e.Choice,
 		Requested: e.Requested,
+		From:      e.From,
 		Omitted:   e.Omitted,
 		Items:     e.Items,
 	})

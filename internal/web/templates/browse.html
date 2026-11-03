@@ -21,13 +21,15 @@
 <div class="workspace">
 {{if .Empty}}<section class="card empty"><span class="tile round">{{template "icon" "folder"}}</span><p>{{t $.Lang "browse.empty"}}</p></section>
 {{else}}{{/* One selection form for every row action; each action is a submit button named
-     "op" (zip here; delete from #10). Plain HTML, works with JS off, and read-only
+     "op" (zip, rename, move, delete). Plain HTML, works with JS off, and read-only
      Users get it too (a download is not a write). */}}
 <form method="post" action="{{.Action}}" class="selection card">
 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
 <div class="toolbar">
 <button type="submit" class="btn" name="op" value="zip">{{template "icon" "download"}}{{t $.Lang "browse.zip_selected"}}</button>
-{{if .CanDelete}}<button type="submit" class="btn danger" name="op" value="delete">{{template "icon" "trash-2"}}{{t $.Lang "browse.delete_selected"}}</button>
+{{if .CanDelete}}<button type="submit" class="btn" name="op" value="rename">{{template "icon" "pencil"}}{{t $.Lang "browse.rename_selected"}}</button>
+<button type="submit" class="btn" name="op" value="move">{{template "icon" "folder-input"}}{{t $.Lang "browse.move_selected"}}</button>
+<button type="submit" class="btn danger" name="op" value="delete">{{template "icon" "trash-2"}}{{t $.Lang "browse.delete_selected"}}</button>
 {{end}}<span id="selected-count" class="muted" role="status" data-msg="{{t $.Lang "browse.selected"}}"></span>
 </div>
 <table class="files">

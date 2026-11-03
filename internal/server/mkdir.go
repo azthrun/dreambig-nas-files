@@ -119,13 +119,19 @@ func (s *server) mkdirForm(w http.ResponseWriter, r *http.Request, user string, 
 // clashes reports whether the folder already holds a name that a case-insensitive
 // client (Windows, macOS) would treat as the same as name.
 func (s *server) clashes(dir resolver.Location, name string) bool {
+	return s.clashesWithOther(dir, name, "")
+}
+
+// clashesWithOther is clashes ignoring the entry called self, for a rename that only
+// changes case.
+func (s *server) clashesWithOther(dir resolver.Location, name, self string) bool {
 	entries, err := dir.ReadDir()
 	if err != nil {
 		return false
 	}
 	want := mounts.Fold(name)
 	for _, e := range entries {
-		if mounts.Fold(e.Name) == want {
+		if mounts.Fold(e.Name) == want && e.Name != self {
 			return true
 		}
 	}

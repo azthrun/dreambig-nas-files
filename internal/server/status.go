@@ -24,6 +24,10 @@ var refusals = []struct {
 	key    string
 }{
 	{errNothingSelected, http.StatusBadRequest, "error.no_selection"},
+	{errRenameOne, http.StatusBadRequest, "error.rename_one"},
+	{errOtherMount, http.StatusBadRequest, "error.other_mount"},
+	{errIntoItself, http.StatusBadRequest, "error.into_itself"},
+	{errRelativeLink, http.StatusBadRequest, "error.relative_link"},
 	{resolver.ErrInvalidName, http.StatusBadRequest, "error.bad_name"},
 	{resolver.ErrInvalidPath, http.StatusBadRequest, "error.bad_path"},
 	{trash.ErrInvalid, http.StatusBadRequest, "error.bad_path"},
@@ -37,6 +41,7 @@ var refusals = []struct {
 	{trash.ErrNotFound, http.StatusNotFound, "error.not_found"},
 	{fs.ErrNotExist, http.StatusNotFound, "error.not_found"},
 	{errExists, http.StatusConflict, "error.exists"},
+	{trash.ErrTaken, http.StatusConflict, "error.exists"},
 }
 
 // refusal is how one error is answered.

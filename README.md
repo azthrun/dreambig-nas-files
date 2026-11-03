@@ -1,6 +1,6 @@
 # NAS Files
 
-A small web file manager for a Synology NAS. People on the home network or the tailnet sign in, browse designated NAS folders, and download, upload and delete files. One Go container, plain HTTP on one host port (see `docs/adr/`, `GLOSSARY.md` for the terms used here).
+A small web file manager for a Synology NAS. People on the home network or the tailnet sign in, browse designated NAS folders, and download, upload, rename, move and delete files. One Go container, plain HTTP on one host port (see `docs/adr/`, `GLOSSARY.md` for the terms used here).
 
 All names, addresses and paths below in `<angle brackets>` are placeholders. Replace them with your own and never commit real ones: this repository is public.
 

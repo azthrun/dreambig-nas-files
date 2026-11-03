@@ -181,3 +181,51 @@ func TestKeepBothCannotPlaceAFilePastTheSystemNameLimit(t *testing.T) {
 		t.Errorf("want the refusal audited, got %v", ls)
 	}
 }
+
+// A folder's contents go with it, so what counts is the longest path inside. The limit is
+// exact, and a link in the folder is not walked: this one would lead round forever.
+func TestMoveLooksAtTheLongestPathInsideAFolder(t *testing.T) {
+	e := upEnv(t)
+	c := e.SignIn("alice")
+	dir, room := deepFolder(t, e, c)
+	e.WriteFile("docs/in/f/"+strings.Repeat("c", room-len("f")), "c")
+	e.WriteFile("docs/in/g/"+strings.Repeat("c", room-len("g/")), "c")
+	e.Symlink("docs/in/g/up", "..")
+
+	rec := c.Post(folderURL("docs/in"), doMove(dir, "g", "f"))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("one byte over = %d", rec.Code)
+	}
+	if !exists(e, "docs/in/f") || !exists(e, "docs/in/g") || exists(e, dir+"/g") {
+		t.Error("a refused move changed something")
+	}
+
+	if rec := c.Post(folderURL("docs/in"), doMove(dir, "g")); rec.Code != http.StatusSeeOther {
+		t.Fatalf("at the limit = %d", rec.Code)
+	}
+	if got := c.Get("/files/" + dir + "/g/" + strings.Repeat("c", room-len("g/"))); got.Code != http.StatusOK {
+		t.Errorf("the moved file answers %d", got.Code)
+	}
+}
+
+func TestRenameLooksAtTheLongestPathInsideAFolder(t *testing.T) {
+	e := upEnv(t)
+	c := e.SignIn("alice")
+	dir, room := deepFolder(t, e, c)
+	file := strings.Repeat("c", room-len("f/"))
+	e.WriteFile(dir+"/f/"+file, "c")
+
+	rec := c.Post(folderURL(dir), doRename("f", "ff"))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("one byte over = %d", rec.Code)
+	}
+	if !exists(e, dir+"/f/"+file) || exists(e, dir+"/ff") {
+		t.Error("a refused rename changed something")
+	}
+
+	// A file has nothing inside, so the same length is fine.
+	e.WriteFile(dir+"/file", "c")
+	if rec := c.Post(folderURL(dir), doRename("file", strings.Repeat("d", room))); rec.Code != http.StatusSeeOther {
+		t.Fatalf("a file at the limit = %d", rec.Code)
+	}
+}
